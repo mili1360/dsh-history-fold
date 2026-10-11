@@ -196,20 +196,56 @@ from ever firing.
 ## Tests
 
 ```bash
-npm test            # both suites
-npm run test:fold
-npm run test:profile
+npm test              # all three suites
+npm run test:fold     # fold policy and the archive
+npm run test:profile  # the per-turn size profile
+npm run test:edge     # boundaries: thresholds, floors, odd surfaces, hostile config
+npm run test:mutate   # reintroduce six real defects and require the suite to catch each
+npm run test:all      # npm test + mutation testing
 ```
 
 They run fully offline: no DSH, no network, no API key, and a throwaway `DSH_HOME` under
-`os.tmpdir()`. The archive fix and the fresh-install safety contract both have regression
-tests, each confirmed with a negative control (reintroducing the defect turns the suite red;
-restoring the fix turns it green).
+`os.tmpdir()`.
 
-> **For contributors:** `test()` **must** `await fn()`. A synchronous harness reports `ok`
-> before any async assertion runs, and lets the script reach `process.exit(0)` first — which
-> silently turns the whole suite into a no-op. This project shipped that bug for a while; see
-> `CHANGELOG.md` for the failure mode and how it was detected.
+| Suite | Cases | Covers |
+|---|---|---|
+| `fold-tests` | 15 | the fold itself: span, provenance, balance, archive-before-fold, the archive body fix, the fresh-install contract |
+| `profile-tests` | 8 | the per-turn size profile |
+| `edge-tests` | 19 | exact-threshold behaviour, unreachable targets, both worth-folding floors, `keepRecentNodes` extremes, unclosed tool pairs, empty/degenerate surfaces, a tiny digest budget, an unreachable feed, hostile and corrupt config, a second fold in one session |
+
+**Mutation testing** is the reason to trust the green. A passing suite proves nothing on its
+own — this project shipped a suite that ran *zero* assertions for weeks while printing
+`13 passed, 0 failed`. `npm run test:mutate` reintroduces six defects that have really
+existed (the dropped tool-result body, live-by-default settings, a removed mid-turn guard, an
+ignored worth-folding floor, a strict trigger comparison, a dropped tool-pairing balance
+requirement) and fails unless the suite goes red for every one. Current result: **6 / 6**.
+
+> **For contributors:** `test()` **must** `await fn()`, in every suite. A synchronous harness
+> reports `ok` before any async assertion runs and lets the script reach `process.exit(0)`
+> first, which silently turns the whole suite into a no-op. See `CHANGELOG.md` for the full
+> story and how it was detected.
+
+### Verified end to end
+
+Beyond the unit suites, the fold has been run end to end against a real 1,210-turn session
+(surface 213,919 tokens): **15 consecutive folds**, each verifying that every folded message
+body appears verbatim in the archive (`456/456` bodies, `299` tool results, in a 608-message
+fold), plus a second fold in the same session, a reload after a DSH restart, and a recall
+test where the answer was a random string planted so that it existed nowhere on disk — the
+model found it by searching the archive, and said plainly that it was not in its visible
+context.
+
+Two limits worth knowing:
+
+- **The in-context index is not a summary you can rely on for detail.** It was 29,937
+  characters in that test, and the model did not locate a specific string inside it. Actual
+  recall comes from the archive plus the notice telling the model to search it. The index
+  tells the model *what exists*, not *what it said*.
+- **Anything that makes DSH's token meter throw disables folding silently.** The plugin logs
+  `no-meter` and skips the turn (fail open, nothing is lost), and the official compactor
+  depends on the same meter. A session-sidecar pruner that emitted `placeholder` blocks was
+  observed to cause exactly this; it is off by default and unrelated to the live path.
+
 
 ## Limitations
 

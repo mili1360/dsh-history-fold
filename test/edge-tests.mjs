@@ -1,0 +1,393 @@
+// Edge-case and robustness tests for dsh-history-fold.
+//
+// fold-tests.mjs covers the happy path and the main guards. This file covers the boundaries
+// that a plugin meant to rewrite conversation history must not get wrong:
+// unreachable targets, minimums, exact-threshold behaviour, unclosed tool pairs, degenerate
+// surfaces, hostile config, and a second fold in the same session.
+//
+// Nothing here touches a running DSH or the real DSH_HOME.
+//
+// Run: npm run test:edge
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'history-fold-edge-'))
+process.env.DSH_HOME = tmp
+fs.mkdirSync(path.join(tmp, 'dsh-history-fold'), { recursive: true })
+
+const plugin = await import('../lib/index.js')
+
+let passed = 0
+let failed = 0
+
+// NOTE: must await fn(). A synchronous harness reports "ok" before any async assertion runs
+// and lets the script reach process.exit() first, turning the whole suite into a no-op.
+async function test(label, fn) {
+  try {
+    await fn()
+    passed++
+    console.log('  ok   ' + label)
+  } catch (err) {
+    failed++
+    console.log('  FAIL ' + label + ' -> ' + err.message)
+  }
+}
+
+function writeConfig(cfg) {
+  fs.writeFileSync(path.join(tmp, 'dsh-history-fold', 'config.json'), JSON.stringify(cfg))
+}
+
+// Build a session from an explicit node script, so odd shapes are expressible.
+// Each entry: { type, data, tokens }. toolCallId/toolResultId let us leave a pair unbalanced.
+function buildSession(entries) {
+  const events = []
+  const nodes = []
+  const tokens = []
+  const tokensBySeq = new Map()
+  for (const e of entries) {
+    const seq = events.length
+    events.push({ seq, type: e.type, data: e.data })
+    nodes.push(seq)
+    tokens.push(e.tokens)
+    tokensBySeq.set(seq, e.tokens)
+  }
+  const appended = []
+  const session = {
+    header: { id: 'session-test-0001' },
+    surface: { nodes: nodes.slice(), replaceGeneration: 0 },
+    events,
+    append(type, data, opts) {
+      appended.push({ type, data, opts })
+      return { seq: events.length }
+    },
+  }
+  // The meter must read the LIVE surface, not a snapshot: a fold replaces a range with one
+  // new seq, and a meter that kept the original array would keep reporting the old size.
+  const meter = {
+    setTokens(seq, n) { tokensBySeq.set(seq, n) },
+    measure() {
+      let surfaceTokens = 0
+      const measured = session.surface.nodes.map((seq) => {
+        const t = tokensBySeq.get(seq) || 0
+        surfaceTokens += t
+        return { seq, tokens: t }
+      })
+      return { surfaceTokens, totalTokens: surfaceTokens + 13000, baseline: { kind: 'estimated', tokens: 0 }, nodes: measured }
+    },
+  }
+  return { session, meter, nodes, tokens, appended }
+}
+
+const STEP = [
+  { type: 'user/message', tokens: 100, data: { id: 'u', role: 'user', content: [{ type: 'text', text: 'ask' }], source: { kind: 'user' } } },
+  { type: 'assistant/message', tokens: 50, data: { message: { id: 'a', role: 'assistant', content: [{ type: 'tool-call', id: 'c', name: 't', arguments: '{}' }], source: { kind: 'model' } } } },
+  { type: 'tool/result', tokens: 900, data: { message: { id: 'r', role: 'user', content: [{ type: 'tool-result', toolCallId: 'c', content: [] }], source: { kind: 'tool' } } } },
+]
+
+// n steps of the standard shape, 1050 tokens each
+function makeSteps(n, tokens = null) {
+  const out = []
+  for (let i = 0; i < n; i++) {
+    for (const s of STEP) out.push({ ...s, tokens: tokens === null ? s.tokens : tokens })
+  }
+  return out
+}
+
+async function runHandler(session, meter, step = 1) {
+  let handler
+  const ctx = {
+    get tokenMeter() { return meter },
+    on(event, fn) { assert.equal(event, 'agent/pre-step'); handler = fn },
+    effect() {},
+  }
+  plugin.apply(ctx)
+  assert.equal(typeof handler, 'function', 'apply must register an agent/pre-step listener')
+  return Promise.resolve(handler({ agent: { session }, step, turn: 12 }, async () => {})).then(() => true)
+}
+
+function logLines() {
+  const file = path.join(tmp, 'logs', 'history-fold.jsonl')
+  if (!fs.existsSync(file)) return []
+  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+}
+function lastMark() {
+  const lines = logLines()
+  return lines[lines.length - 1]
+}
+function archivePath() {
+  return path.join(tmp, 'history-fold', 'archive', 'session-test-0001.jsonl')
+}
+function resetLog() {
+  fs.rmSync(path.join(tmp, 'logs'), { recursive: true, force: true })
+  fs.rmSync(path.join(tmp, 'history-fold', 'archive'), { recursive: true, force: true })
+}
+
+// A config that folds reliably: 20 steps = 21000 tokens, keep 9 nodes = 3 steps = 3150.
+const BASE = {
+  enabled: true,
+  dryRun: false,
+  profile: false,
+  triggerSurfaceTokens: 5000,
+  targetSurfaceTokens: 4000,
+  keepRecentNodes: 9,
+  minFoldNodes: 3,
+  minFoldTokens: 1000,
+  archive: true,
+  archiveDir: 'history-fold/archive',
+  digestMaxChars: 30000,
+  digestLineChars: 160,
+  onlyAtTurnStart: true,
+}
+
+console.log('dsh-history-fold edge tests')
+
+// ---------------------------------------------------------------- threshold boundaries
+
+await test('surface exactly at the trigger: idle (the comparison is <=)', async () => {
+  resetLog()
+  writeConfig({ ...BASE, triggerSurfaceTokens: 21000 })
+  const { session, meter } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(lastMark().mark, 'idle')
+  assert.equal(lastMark().surfaceTokens, 21000)
+})
+
+await test('surface one token above the trigger: folds', async () => {
+  resetLog()
+  writeConfig({ ...BASE, triggerSurfaceTokens: 20999 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+  assert.equal(lastMark().mark, 'folded')
+})
+
+// ---------------------------------------------------------------- unreachable goals
+
+await test('unreachable target given keepRecentNodes: no-safe-cut, nothing written', async () => {
+  resetLog()
+  // keep 9 nodes = 3150 tokens always remain, so a target of 100 can never be met
+  writeConfig({ ...BASE, targetSurfaceTokens: 100 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(lastMark().mark, 'no-safe-cut')
+})
+
+await test('minFoldNodes not met: no-safe-cut', async () => {
+  resetLog()
+  writeConfig({ ...BASE, minFoldNodes: 1000 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(lastMark().mark, 'no-safe-cut')
+})
+
+await test('minFoldTokens not met: no-safe-cut', async () => {
+  resetLog()
+  writeConfig({ ...BASE, minFoldTokens: 1000000 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(lastMark().mark, 'no-safe-cut')
+})
+
+await test('keepRecentNodes larger than the surface: no-safe-cut, never touches it', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 500 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(lastMark().mark, 'no-safe-cut')
+})
+
+await test('keepRecentNodes 0: folds everything except the last node', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 0, targetSurfaceTokens: 900 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'must fold')
+  const end = appended[0].opts.surfaceOp.end
+  const idx = session.surface.nodes.indexOf(end)
+  assert.equal(session.surface.nodes.length - idx - 1, 0, 'nothing may be kept')
+})
+
+// ---------------------------------------------------------------- cut safety
+
+await test('an unclosed tool call is never cut across', async () => {
+  resetLog()
+  // 10 balanced steps, then a dangling assistant tool-call with no matching result
+  const entries = makeSteps(19)
+  entries.push({ type: 'user/message', tokens: 100, data: { id: 'x', role: 'user', content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } } })
+  entries.push({ type: 'assistant/message', tokens: 50, data: { message: { id: 'y', role: 'assistant', content: [{ type: 'tool-call', id: 'dangling', name: 't', arguments: '{}' }], source: { kind: 'model' } } } })
+  writeConfig({ ...BASE, keepRecentNodes: 0, targetSurfaceTokens: 900 })
+  const { session, meter, appended } = buildSession(entries)
+  await runHandler(session, meter)
+  if (appended.length === 0) {
+    assert.equal(lastMark().mark, 'no-safe-cut', 'if it declines, it must say why')
+    return
+  }
+  // if it did fold, the cut must not leave the dangling call on the folded side
+  const end = appended[0].opts.surfaceOp.end
+  const idx = session.surface.nodes.indexOf(end)
+  let open = 0
+  for (let i = 0; i <= idx; i++) {
+    const ev = session.events[session.surface.nodes[i]]
+    if (ev.type === 'tool/result') open -= 1
+    else if (ev.type === 'assistant/message') open += (ev.data.message.content || []).filter((b) => b.type === 'tool-call').length
+  }
+  assert.equal(open, 0, 'an open tool call must never cross the fold cut')
+})
+
+// ---------------------------------------------------------------- degenerate surfaces
+
+await test('empty surface: no-op, no log line claiming work', async () => {
+  resetLog()
+  writeConfig(BASE)
+  const { session, meter, appended } = buildSession([])
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(logLines().filter((l) => l.mark === 'folded').length, 0)
+})
+
+await test('single node: no-op', async () => {
+  resetLog()
+  writeConfig(BASE)
+  const { session, meter, appended } = buildSession([{ ...STEP[0], tokens: 999999 }])
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+})
+
+await test('surface node missing from the event log: refuses to cut, fails open', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 0 })
+  const { session, meter } = buildSession(makeSteps(20))
+  session.events.splice(5, 1) // surface and log now disagree
+  await runHandler(session, meter)
+  const marks = logLines().map((l) => l.mark)
+  assert.ok(marks.includes('no-safe-cut') || marks.includes('error'), 'must refuse rather than guess')
+})
+
+// ---------------------------------------------------------------- digest budget
+
+await test('tiny digestMaxChars: still folds, and says it sampled', async () => {
+  resetLog()
+  writeConfig({ ...BASE, digestMaxChars: 200 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+  const text = appended[0].data.content[0].text
+  assert.ok(text.length < 4000, 'the digest must respect a tiny budget')
+  assert.match(text, /sampled: every \d+th/, 'must admit it sampled rather than truncating silently')
+})
+
+// ---------------------------------------------------------------- memory feed
+
+await test('an unreachable feed URL never blocks a fold (fail-open)', async () => {
+  resetLog()
+  // A closed local port refuses immediately, so no timeout is needed.
+  // NOTE: the feed itself is an optional feature that only some builds ship; what this case
+  // pins down is the contract that matters either way -- an unreachable endpoint, whether the
+  // key is honoured or simply ignored, must never stop the fold or throw out of the hook.
+  writeConfig({ ...BASE, memoryFeed: true, memoryFeedUrl: 'http://127.0.0.1:9/memory-eternal/api' })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  const nexted = await runHandler(session, meter)
+  assert.equal(nexted, true, 'must always call next()')
+  assert.equal(appended.length, 1, 'a dead endpoint must never block a fold')
+})
+
+await test('an unreachable feed URL is reported in the log when the feature is present', async () => {
+  resetLog()
+  writeConfig({ ...BASE, memoryFeed: true, memoryFeedUrl: 'http://127.0.0.1:9/memory-eternal/api' })
+  const { session, meter } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  const marks = logLines().map((l) => l.mark)
+  const hasFeed = marks.includes('fed') || marks.includes('feed-error')
+  // If a build has no feed at all, neither mark appears and that is fine -- but a build that
+  // does have one must not fail silently.
+  if (!hasFeed) {
+    assert.equal(pluginSupportsFeed(), false, 'a build with a feed must log fed/feed-error instead of swallowing it')
+  }
+})
+
+// Does THIS build know about the optional memory feed at all?
+function pluginSupportsFeed() {
+  const src = fs.readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
+  return src.includes('memoryFeed')
+}
+
+// ---------------------------------------------------------------- hostile config
+
+await test('unknown config keys are ignored, not fatal', async () => {
+  resetLog()
+  writeConfig({ ...BASE, thisKeyDoesNotExist: true, nested: { a: 1 } })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+})
+
+await test('wrong-typed config values do not crash the hook', async () => {
+  resetLog()
+  writeConfig({ ...BASE, triggerSurfaceTokens: 'lots', keepRecentNodes: 'many', digestMaxChars: null })
+  const { session, meter } = buildSession(makeSteps(20))
+  const nexted = await runHandler(session, meter)
+  assert.equal(nexted, true, 'must always call next()')
+})
+
+await test('corrupt config.json: falls back to the inert defaults', async () => {
+  resetLog()
+  fs.writeFileSync(path.join(tmp, 'dsh-history-fold', 'config.json'), '{ this is not json')
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0, 'a corrupt config must not fold anything')
+})
+
+await test('enabled:false with dryRun:false is still completely inert', async () => {
+  resetLog()
+  writeConfig({ ...BASE, enabled: false, dryRun: false })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0)
+  assert.equal(logLines().length, 0)
+})
+
+// ---------------------------------------------------------------- repeated folding
+
+await test('two folds in one session: the second one folds the previous marker', async () => {
+  resetLog()
+  // keep 6 nodes = 2 steps, so after the first fold the surface is [marker, ...6 nodes].
+  // minFoldNodes is 1 on purpose: the marker alone can already reach the target, and folding a
+  // single node is legal here. With the shipped default (20) the plugin would -- correctly --
+  // log no-safe-cut instead, because taking one node is below its worth-folding floor.
+  writeConfig({ ...BASE, keepRecentNodes: 6, targetSurfaceTokens: 3000, minFoldNodes: 1 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+  assert.equal(lastMark().mark, 'folded')
+
+  // Simulate what dsh-session does: splice the replacement into the folded range.
+  const { start, end } = appended[0].opts.surfaceOp
+  const si = session.surface.nodes.indexOf(start)
+  const ei = session.surface.nodes.indexOf(end)
+  const markerSeq = 9000
+  meter.setTokens(markerSeq, 20000) // the marker carries the digest, so it is sizeable
+  // The marker must exist in the event log too: balancedCuts refuses to cut at a node it
+  // cannot look up, which is exactly the guard we want.
+  session.events.push({
+    seq: markerSeq,
+    type: 'user/message',
+    data: { id: 'marker', role: 'user', content: [{ type: 'text', text: 'folded' }], source: { kind: 'plugin', plugin: 'dsh-history-fold' } },
+  })
+  session.surface.nodes.splice(si, ei - si + 1, markerSeq)
+
+  await runHandler(session, meter)
+  assert.equal(appended.length, 2, 'a second fold must be possible')
+  assert.equal(lastMark().mark, 'folded')
+  const second = appended[1].opts
+  assert.ok(second.sourceEventSeqs.includes(markerSeq), 'the second fold must shadow the first marker')
+})
+
+fs.rmSync(tmp, { recursive: true, force: true })
+console.log('\n' + passed + ' passed, ' + failed + ' failed')
+process.exit(failed === 0 ? 0 : 1)

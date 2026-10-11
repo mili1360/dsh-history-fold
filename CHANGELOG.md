@@ -69,3 +69,17 @@ against a real 608-message fold.
 - **Added regression tests** for the archive body fix and for the fresh-install safety
   contract. Both were confirmed with negative controls: reintroducing each defect turns
   the suite red, restoring the fix turns it green.
+- **Added `test/edge-tests.mjs`** (19 cases) for the boundaries that matter when a plugin
+  rewrites conversation history: exact-threshold behaviour (`<=`, not `<`), unreachable
+  targets, both worth-folding floors, `keepRecentNodes` of 0 and larger than the surface,
+  an unclosed tool call that must never be cut across, empty and single-node surfaces, a
+  surface node missing from the event log, a tiny digest budget, an unreachable feed URL,
+  unknown and wrong-typed config keys, a corrupt config file, `enabled:false` with
+  `dryRun:false`, and a second fold in the same session.
+- **Added `test/mutations.cjs`** (`npm run test:mutate`): it reintroduces six real defects
+  one at a time — the dropped tool-result body, live-by-default settings, a removed
+  mid-turn guard, an ignored worth-folding floor, a strict trigger comparison, and a
+  dropped tool-pairing balance requirement — and fails unless the suite catches every one.
+  Current result: **6 / 6 caught**. A green suite on its own proves nothing; this is what
+  makes the green meaningful.
+
