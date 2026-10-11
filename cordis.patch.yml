@@ -1,0 +1,28 @@
+# ============================================================================
+# dsh-history-fold —— DSH bundle patch（挂载声明）
+#
+# 干什么：会话很长时，把最老的一批 surface 节点折成一条消息，降低每轮的
+#         历史 token 数（实测：历史 49.7 万 token 时 decode 只有 59 tok/s，
+#         新会话是 176 tok/s）。
+#
+# ★ 安全默认：enabled=false + dryRun=true
+#   装上之后【什么都不做】—— 没有 config.json 时它不读、不写、也不记日志。
+#   要看日志： $DSH_HOME/logs/history-fold.jsonl
+#   要真开：   建 $DSH_HOME/dsh-history-fold/config.json
+#              先写 {"enabled":true,"dryRun":true} 看一段时间，确认数字没问题
+#              再改 "dryRun":false  （热读，不用重启）
+#
+# 用的是官方 compaction 完全相同的机制，不改任何 node_modules：
+#   session.append('user/message', msg, {
+#     surfaceOp: { op: 'replace', start, end },
+#     sourceEventSeqs: [...全部被折的 seq...]
+#   })
+#   dsh-session 随后 splice 到原位置，时间顺序不变。
+#
+# ⚠️ 改完必须【重启 DSH】才加载
+# ⚠️ 万一 DSH 起不来：把下面 insert 那段删掉即可
+# ============================================================================
+
+- insert:
+    - id: dsh-history-fold
+      name: 'file:///path/to/dsh-history-fold/lib/index.js'

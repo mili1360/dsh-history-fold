@@ -1,0 +1,21 @@
+# Runtime and generated state -- never commit any of this.
+node_modules/
+*.log
+
+# Plugin runtime output, written under $DSH_HOME, not here. Listed so that a
+# stray copy made while debugging cannot be committed by accident.
+history-fold/
+logs/
+
+# Test scratch
+test/tmp/
+*.tmp
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/

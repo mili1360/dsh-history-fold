@@ -1,0 +1,41 @@
+{
+  "name": "dsh-history-fold",
+  "version": "0.1.0",
+  "description": "Fold the oldest part of a DSH session's surface history into one message that points at a lossless local archive, so a long session stops paying for its whole history on every request.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "context",
+    "history",
+    "compaction",
+    "token-budget"
+  ],
+  "license": "MIT",
+  "author": "三文鱼",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/fold-tests.mjs && node test/profile-tests.mjs",
+    "test:fold": "node test/fold-tests.mjs",
+    "test:profile": "node test/profile-tests.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
