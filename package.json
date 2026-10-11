@@ -13,6 +13,14 @@
   ],
   "license": "MIT",
   "author": "三文鱼",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mili1360/dsh-history-fold.git"
+  },
+  "homepage": "https://github.com/mili1360/dsh-history-fold#readme",
+  "bugs": {
+    "url": "https://github.com/mili1360/dsh-history-fold/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
