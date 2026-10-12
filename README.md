@@ -1,5 +1,12 @@
 # dsh-history-fold
 
+[![dsh-plugin](https://img.shields.io/badge/dsh--plugin-community%20topic-blue)](https://github.com/topics/dsh-plugin)
+[![deepseek-harness](https://img.shields.io/badge/deepseek--harness-plugin-4b6bfb)](https://github.com/topics/deepseek-harness)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> **Topics:** `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
+> `context-compaction` · `non-summary` · `recoverable` · `extractive-index`
+
 A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that folds the **oldest**
 part of a session's visible history into a single message backed by a **lossless local
 archive**, so a long session stops paying for its entire history on every request.

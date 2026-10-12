@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "description": "Fold the oldest part of a DSH session's surface history into one message that points at a lossless local archive, so a long session stops paying for its whole history on every request.",
   "keywords": [
-    "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "context",
-    "history",
-    "compaction",
+    "history-fold",
+    "lossless-archive",
+    "context-compaction",
+    "non-summary",
+    "recoverable",
+    "extractive-index",
     "token-budget"
   ],
   "license": "MIT",

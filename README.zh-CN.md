@@ -1,5 +1,12 @@
 # dsh-history-fold（中文说明）
 
+[![dsh-plugin](https://img.shields.io/badge/dsh--plugin-community%20topic-blue)](https://github.com/topics/dsh-plugin)
+[![deepseek-harness](https://img.shields.io/badge/deepseek--harness-plugin-4b6bfb)](https://github.com/topics/deepseek-harness)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> **Topics:** `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
+> `context-compaction` · `non-summary` · `recoverable` · `extractive-index`
+
 > 英文主文档见 [README.md](README.md)。代码注释保持中文，本文件是完整的对照说明。
 
 DSH 插件：把会话里**最老的一批** surface 节点折成一条消息，消息里带着**无损的本地归档**
