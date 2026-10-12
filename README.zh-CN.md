@@ -143,11 +143,24 @@ The one-line index below is extractive, not a rewritten summary ...
 > 换算成 token 就是一条下限 ✓ 目标低于这条下限**永远达不到** ⇒ 每轮都记 `no-safe-cut` ✓
 > （实测踩过：`keepRecentNodes: 9` + `targetSurfaceTokens: 2000` 就是这种自相矛盾）
 
-### 和官方压缩的关系
+### 和官方压缩、以及和"叫 fold 的其他插件"的关系
 
-官方 `dsh-compaction-basic` 在 `thresholdRatio × contextWindow` = `0.8 × 100 万` = **80 万**触发，
-保留 `0.16 × window` = **16 万** ✓ 它的替换内容**是模型写的摘要，有损** ✗
-把本插件的触发线压在 80 万以下，**官方的有损摘要就永远不会触发** ✓
+| | 官方 `dsh-compaction-basic` | 本插件 | UI 折叠类插件 |
+|---|---|---|---|
+| 历史被换成什么 | **模型写的摘要** | **抽取式索引** + 归档路径 | 什么都不换，请求原样不动 |
+| 每次折叠的成本 | 多一次模型调用 | 零，压根不调模型 | 零 |
+| 原文还在吗 | ✗ 只剩摘要 | ✓ 逐字写在 `$DSH_HOME/history-fold/archive/` | n/a |
+| 能找回来吗 | ✗ | ✓ 一条 `rg` 就行 | n/a |
+| 改的是什么 | surface（发给模型的东西） | surface（发给模型的东西） | **显示**（长消息在界面上折起来看） |
+| 触发线 | `thresholdRatio × contextWindow`，默认 80 万 | `triggerSurfaceTokens`，压在官方那条线下 | n/a |
+
+名字里带 `fold` 的插件，很多是**界面折叠**：把一条长消息在 UI 里折起来方便看，
+**请求体一个字节都不动** ✓ 本插件恰好相反 —— 完全不碰界面，
+它搬的每一个字节都是为了**下一轮请求的 token** ✓
+装之前先想清楚你要的是哪一种。
+
+同一个问题的**磁盘侧**（会话日志因为"定稿后的流式碎片永不清理"而膨胀）见
+[dsh-session-vacuum](https://github.com/mili1360/dsh-session-vacuum) ✓
 
 **判定用的是真实 token 计量器**（`ctx.tokenMeter.measure`）✓ **看不到计量器就拒绝折叠** ✓
 因为节点体积差好几个数量级，**用节点数当预算是不成立的** ✓

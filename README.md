@@ -165,12 +165,30 @@ every turn**, so edits apply without a restart.
 > which is at least that many steps' worth of tokens. A target below that floor can never be
 > met and the plugin will log `no-safe-cut` every turn.
 
-### Relation to the built-in compactor
+### Relation to the built-in compactor, and to the other "fold"-named plugins
 
-`dsh-compaction-basic` compacts at `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so
-800k — and keeps `0.16 × window` (160k). Its replacement is a **model-written summary**,
-which is lossy. Keeping this plugin's trigger well below 800k is what stops that summarizer
-from ever firing.
+| | built-in `dsh-compaction-basic` | this plugin | UI-fold plugins |
+|---|---|---|---|
+| What replaces the history | a **model-written summary** | an **extractive index** + an archive pointer | nothing — the request is untouched |
+| Cost per fold | one extra model call | none, no model call at all | none |
+| Is the original kept | no — the summary is all that survives | yes, verbatim, in `$DSH_HOME/history-fold/archive/` | n/a |
+| Recoverable | no | yes, with one `rg` over the archive | n/a |
+| What it changes | the surface (what the model is sent) | the surface (what the model is sent) | the **display** (long messages collapsed in the UI) |
+| Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerSurfaceTokens`; keep it below the compactor's line | n/a |
+
+> **Keep the trigger below the compactor's line.** `dsh-compaction-basic` fires at
+> `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k — and keeps `0.16 × window`
+> (160k). Its replacement is a model-written summary, which is lossy. Folding first is what
+> stops that summarizer from ever firing at all.
+
+A plugin with `fold` in its name is often a **display** fold: it collapses a long message in
+the UI so it is easier to read, and leaves the request payload exactly as it was. This plugin
+is the opposite — it does not touch the UI at all, and every byte it moves is aimed at the
+tokens sent on the *next* request. Decide which of the two you actually want before installing.
+
+For the on-disk side of the same problem — session logs growing because finalised streaming
+fragments are never removed — see
+[dsh-session-vacuum](https://github.com/mili1360/dsh-session-vacuum).
 
 ## Log
 
