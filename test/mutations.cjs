@@ -17,6 +17,7 @@ const SUITES = [
   path.join(ROOT, 'test', 'fold-tests.mjs'),
   path.join(ROOT, 'test', 'profile-tests.mjs'),
   path.join(ROOT, 'test', 'edge-tests.mjs'),
+  path.join(ROOT, 'test', 'ratio-tests.mjs'),
 ];
 
 const original = fs.readFileSync(LIB, 'utf8');
@@ -45,13 +46,40 @@ const MUTATIONS = [
   },
   {
     name: 'the trigger comparison becomes strict (< instead of <=)',
-    from: 'if (surfaceTokens <= cfg.triggerSurfaceTokens) {',
-    to: 'if (surfaceTokens < cfg.triggerSurfaceTokens) {',
+    // anchor updated when the thresholds became resolvable: the comparison itself is byte for
+    // byte what it always was, only `cfg.triggerSurfaceTokens` became `triggerTokens`.
+    from: 'if (surfaceTokens <= triggerTokens) {',
+    to: 'if (surfaceTokens < triggerTokens) {',
   },
   {
     name: 'the tool-pairing balance requirement is dropped',
-    from: 'if (balanced[i + 1] && remaining <= cfg.targetSurfaceTokens) { endIdx = i; break }',
-    to: 'if (remaining <= cfg.targetSurfaceTokens) { endIdx = i; break }',
+    // anchor updated for the same reason as the trigger comparison above: the balance check is
+    // unchanged, only cfg.targetSurfaceTokens became the resolvable targetTokens.
+    from: 'if (balanced[i + 1] && remaining <= targetTokens) { endIdx = i; break }',
+    to: 'if (remaining <= targetTokens) { endIdx = i; break }',
+  },
+  {
+    name: 'an explicit absolute key no longer beats the ratio (precedence inverted)',
+    from: "  if (explicit !== undefined) return { value: explicit, source: 'absolute' }\n",
+    to: '',
+  },
+  {
+    name: 'the raw-file key check becomes a merged-config check (DEFAULTS would always win)',
+    from: 'rawKeys instanceof Set && rawKeys.has(key)',
+    to: "key in cfg",
+  },
+  {
+    name: 'an invalid ratio is accepted instead of falling back',
+    from: '  return typeof value === \'number\' && Number.isFinite(value) && value > 0 && value < 1 ? value : undefined',
+    to: '  return value === undefined ? undefined : value',
+  },
+  {
+    name: 'the context window is trusted without validation',
+    // A fractional or absurd window must not become a threshold: dsh-llm validates
+    // contextWindow as a positive INTEGER, so a non-integer here means the value is not
+    // capacity data at all.
+    from: "      if (typeof contextWindow === 'number' && Number.isFinite(contextWindow) && Number.isInteger(contextWindow) && contextWindow > 0) {",
+    to: '      if (true) {',
   },
 ];
 
@@ -107,6 +135,15 @@ console.log('  ' + caught + ' caught / ' + skipped + ' skipped / ' + MUTATIONS.l
 console.log('  lib restored, fold-tests exit=' + restored.code);
 if (caught + skipped !== MUTATIONS.length) {
   console.log('\n  some mutations were NOT caught: the suite has a hole there.');
+  process.exit(1);
+}
+// A SKIP is not a pass. An anchor that stopped matching means that defect is no longer being
+// tested at all -- and the script would otherwise print "every mutation was caught" while a
+// mutation never ran. This happened: two anchors in this very file went stale in the same
+// commit that moved the expressions they pointed at.
+if (skipped > 0) {
+  console.log('\n  ' + skipped + ' mutation(s) were SKIPPED: an anchor no longer matches lib/index.js,');
+  console.log('  so that defect is not being tested. Fix the anchor -- a skip is not a pass.');
   process.exit(1);
 }
 console.log('\n  every mutation was caught: the suite reacts to real defects.');

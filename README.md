@@ -37,12 +37,13 @@ back.
 
 ## What it does
 
-Before a turn's first step, if the visible surface is above `triggerSurfaceTokens`, the
-plugin:
+Before a turn's first step, if the visible surface is above the trigger — `triggerRatio ×
+contextWindow`, or an explicit absolute `triggerSurfaceTokens`, see
+[how the thresholds are resolved](#how-the-two-thresholds-are-resolved) — the plugin:
 
 1. Picks the oldest run of nodes that ends on a tool-pairing **balanced** cut, leaves at
-   least `keepRecentNodes` behind, and brings the surface down to about
-   `targetSurfaceTokens`.
+   least `keepRecentNodes` behind, and brings the surface down to about the target
+   (`targetRatio × contextWindow`, default `0.18`).
 2. **Archives** every folded node, verbatim, to
    `$DSH_HOME/history-fold/archive/<session>.jsonl`. If this write fails the fold is
    abandoned — history is never dropped without a copy on disk first.
@@ -147,8 +148,10 @@ every turn**, so edits apply without a restart.
 | `enabled` | `false` | Master switch. `false` ⇒ loaded but completely idle. |
 | `dryRun` | `true` | `true` ⇒ observe and log only, never write. |
 | `profile` | `true` | Write one size/profile line per turn. |
-| `triggerSurfaceTokens` | `250000` | Fold only above this much visible history. |
-| `targetSurfaceTokens` | `180000` | Fold down to about this much. Must be reachable — see below. |
+| `triggerSurfaceTokens` | `250000` | Absolute trigger, as a fallback — see the resolution order below. Explicit here ⇒ wins. |
+| `targetSurfaceTokens` | `180000` | Absolute target, as a fallback. Explicit here ⇒ wins. Must be reachable — see below. |
+| `triggerRatio` | `0.75` | Fold only above this fraction of the model's context window. Scales with the window; used whenever the window resolves and no absolute key is set. |
+| `targetRatio` | `0.18` | Fold down to about this fraction of the window. |
 | `keepRecentNodes` | `60` | Never fold the most recent this-many nodes. |
 | `minFoldNodes` | `20` | Refuse to fold fewer nodes than this. |
 | `minFoldTokens` | `20000` | Refuse to fold fewer tokens than this. |
@@ -161,9 +164,52 @@ every turn**, so edits apply without a restart.
 | `memoryFeed` | `false` | Post the same digest to a memory service after each fold. |
 | `memoryFeedUrl` | — | e.g. `http://127.0.0.1:7999/memory-eternal/api`. |
 
-> **`targetSurfaceTokens` must be reachable.** At least `keepRecentNodes` nodes always stay,
-> which is at least that many steps' worth of tokens. A target below that floor can never be
-> met and the plugin will log `no-safe-cut` every turn.
+> **`targetSurfaceTokens` / `targetRatio` must be reachable.** At least `keepRecentNodes` nodes
+> always stay, which is at least that many steps' worth of tokens. A target below that floor can
+> never be met and the plugin will log `no-safe-cut` every turn. A target at or above the trigger
+> is unreachable by construction (the fold stops *at* the target, and the surface only ever
+> starts above the trigger), and exits through the same `no-safe-cut` line.
+
+### How the two thresholds are resolved
+
+`triggerSurfaceTokens` / `triggerRatio` (and the same pair for the target) resolve in this
+order, per key, every turn:
+
+1. **The key is present in `config.json`.** `triggerSurfaceTokens: 300000` means 300000 — an
+   explicit absolute value beats the ratio, even when the context window is perfectly
+   resolvable. "Present" means present in the raw file, not in the merged config object:
+   `DEFAULTS` carries these keys too, so a merged-object check would always find one and the
+   ratios would never apply at all.
+2. **Otherwise, if the context window resolves:** `floor(window × ratio)`. The window comes
+   from `ctx.llm.resolveModelInfo(provider, model, signal).context.contextWindow` — the same
+   lookup `dsh-compaction-basic` uses for its own `thresholdRatio × contextWindow`.
+3. **Otherwise:** the shipped absolute default, and the log line says `default`.
+
+The ratio is what scales. A fixed 250000 can never be reached on a 128k-window model, so the
+plugin silently does nothing there; on a 1M window it is only a quarter of capacity, so the
+compactor gets there first.
+
+**Verified on a real DSH instance** (2026-10-12, `web` profile, a 1M-window model): with a
+config that carries no absolute key, a turn logged `windowTokens:1000000`, `trigger:750000`,
+`target:180000`, `triggerSource:"ratio"` and
+`via:"ctx.reflect.get|llm:ctx.reflect.get/agent.options"` — so `llm` was reached through
+`ctx.reflect.get` and the provider/model came from `agent.options`. If none of the three lookup
+paths work in your build, the line says `triggerSource: "default"` and the behaviour is exactly
+what it was before this feature existed.
+
+**Why `0.75` / `0.18`, and keep the trigger just under the compactor's line.**
+`dsh-compaction-basic` fires at `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k —
+and retains `0.16 × window` (160k). Its replacement is a **model-written summary**, which is
+lossy. `0.75` (750k of a 1M window) folds just *below* that line, which is what stops the
+summarizer from ever firing; `0.18` (180k) mirrors its 0.16 retain ratio. Both defaults are
+this project's own absolute settings — 750k and 180k, i.e. `0.75` and `0.18` of a
+1,000,000-token window — expressed as fractions so they survive a change of window.
+
+Every profile and fold line reports what happened: `windowTokens` (the resolved window, or
+`null`), and `triggerSource` / `targetSource` = `absolute` | `ratio` | `default`. A ratio
+outside `(0, 1)` — `0`, `1`, `1.5`, `"0.75"`, `null` — never throws and never becomes a broken
+threshold: it falls back to rule 3 and the line also carries `triggerRatioInvalid` /
+`targetRatioInvalid` so the reason is visible.
 
 ### Relation to the built-in compactor, and to the other "fold"-named plugins
 
@@ -174,12 +220,13 @@ every turn**, so edits apply without a restart.
 | Is the original kept | no — the summary is all that survives | yes, verbatim, in `$DSH_HOME/history-fold/archive/` | n/a |
 | Recoverable | no | yes, with one `rg` over the archive | n/a |
 | What it changes | the surface (what the model is sent) | the surface (what the model is sent) | the **display** (long messages collapsed in the UI) |
-| Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerSurfaceTokens`; keep it below the compactor's line | n/a |
+| Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerRatio × contextWindow` (0.75 ⇒ 750k), just below the compactor's line; an absolute `triggerSurfaceTokens` still overrides it | n/a |
 
 > **Keep the trigger below the compactor's line.** `dsh-compaction-basic` fires at
 > `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k — and keeps `0.16 × window`
 > (160k). Its replacement is a model-written summary, which is lossy. Folding first is what
-> stops that summarizer from ever firing at all.
+> stops that summarizer from ever firing at all. This is exactly why the default is
+> `triggerRatio: 0.75` and not `0.8`: it scales with the window and still sits under the line.
 
 A plugin with `fold` in its name is often a **display** fold: it collapses a long message in
 the UI so it is easier to read, and leaves the request payload exactly as it was. This plugin
@@ -198,7 +245,7 @@ fragments are never removed — see
 |---|---|
 | `profile` | Per-turn size/token breakdown, plus what each candidate `keepRecent` would save. |
 | `profile-error` | Profiling itself failed. |
-| `idle` | Below `triggerSurfaceTokens`; nothing to do. |
+| `idle` | Below the trigger; nothing to do. |
 | `would-fold` | `dryRun` — this is what *would* have been folded. |
 | `folding` / `folded` | A real fold started / committed. Both carry `surfaceTokens`, `foldTokens`, `startSeq`, `endSeq`. |
 | `no-safe-cut` | No balanced cut reaches the target, or the minimums were not met. |
@@ -206,6 +253,17 @@ fragments are never removed — see
 | `archive-failed` | The archive write failed, so the fold was abandoned. |
 | `error` | Anything else. The hook always fails open — a turn is never blocked. |
 | `fed` | The digest was posted to the memory service (`memoryFeed`). |
+
+Every one of these lines also carries the resolved thresholds, so no reader has to guess which
+of the three paths ran:
+
+| Field | Meaning |
+|---|---|
+| `trigger` / `target` | The two thresholds actually used this turn, in tokens. |
+| `windowTokens` | The resolved context window, or `null` when it could not be established. |
+| `triggerSource` / `targetSource` | `absolute` (explicit in `config.json`), `ratio` (`floor(window × ratio)`), or `default` (the shipped absolute fallback). |
+| `triggerRatioInvalid` / `targetRatioInvalid` | Present and `true` only when the configured ratio was unusable and rule 3 was applied instead. |
+| `via` | Which path reached the token meter, and which reached `llm` (e.g. `ctx.tokenMeter|llm:ctx.reflect.get/agent.options`). |
 
 ## Safety model
 
@@ -221,29 +279,33 @@ fragments are never removed — see
 ## Tests
 
 ```bash
-npm test              # all three suites
+npm test              # all four suites
 npm run test:fold     # fold policy and the archive
 npm run test:profile  # the per-turn size profile
 npm run test:edge     # boundaries: thresholds, floors, odd surfaces, hostile config
-npm run test:mutate   # reintroduce six real defects and require the suite to catch each
+npm run test:ratio    # window-ratio thresholds: precedence, fallbacks, invalid ratios
+npm run test:mutate   # reintroduce ten real defects and require the suite to catch each
 npm run test:all      # npm test + mutation testing
 ```
 
 They run fully offline: no DSH, no network, no API key, and a throwaway `DSH_HOME` under
-`os.tmpdir()`.
+`os.tmpdir()`. `ratio-tests` uses a three-line fake `llm`, never a real DSH service.
 
 | Suite | Cases | Covers |
 |---|---|---|
 | `fold-tests` | 15 | the fold itself: span, provenance, balance, archive-before-fold, the archive body fix, the fresh-install contract |
 | `profile-tests` | 8 | the per-turn size profile |
 | `edge-tests` | 19 | exact-threshold behaviour, unreachable targets, both worth-folding floors, `keepRecentNodes` extremes, unclosed tool pairs, empty/degenerate surfaces, a tiny digest budget, an unreachable feed, hostile and corrupt config, a second fold in one session |
+| `ratio-tests` | 31 | the ratio path, the absolute override, every way the window can fail to resolve, invalid ratios, and the unreachable-target path |
 
 **Mutation testing** is the reason to trust the green. A passing suite proves nothing on its
 own — this project shipped a suite that ran *zero* assertions for weeks while printing
-`13 passed, 0 failed`. `npm run test:mutate` reintroduces six defects that have really
-existed (the dropped tool-result body, live-by-default settings, a removed mid-turn guard, an
-ignored worth-folding floor, a strict trigger comparison, a dropped tool-pairing balance
-requirement) and fails unless the suite goes red for every one. Current result: **6 / 6**.
+`13 passed, 0 failed`. `npm run test:mutate` reintroduces ten defects that have really
+existed or could plausibly exist (the dropped tool-result body, live-by-default settings, a
+removed mid-turn guard, an ignored worth-folding floor, a strict trigger comparison, a dropped
+tool-pairing balance requirement, an inverted absolute/ratio precedence, a merged-config key
+check that would let `DEFAULTS` always win, an accepted invalid ratio, an unvalidated context
+window) and fails unless the suite goes red for every one. Current result: **10 / 10**.
 
 > **For contributors:** `test()` **must** `await fn()`, in every suite. A synchronous harness
 > reports `ok` before any async assertion runs and lets the script reach `process.exit(0)`
@@ -275,7 +337,13 @@ Two limits worth knowing:
 ## Limitations
 
 - Tuned and measured against DeepSeek Harness on Windows with a 1,000,000-token context
-  window. The mechanism is adapter-agnostic; the default thresholds are not.
+  window. The mechanism is adapter-agnostic; the shipped absolute fallbacks are not — which is
+  what the ratios are for. When the window resolves, the thresholds scale with it.
+- **Whether `ctx.llm` is really reachable from this plugin's context has not been confirmed
+  against a live DSH.** The lookup mirrors `resolveMeter()` (direct property, then
+  `ctx.reflect.get`, then the agent's own composed context) and never throws, but if no path
+  works in your build the plugin logs `triggerSource: "default"` and behaves exactly as it did
+  before this feature existed.
 - Token counts come from DSH's `tokenMeter`. If it is unavailable the plugin does nothing —
   by design.
 - Folding reduces what the model sees. The archive keeps it recoverable, but reading it back

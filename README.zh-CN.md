@@ -45,6 +45,10 @@ session.append('user/message', message, {
 
 `dsh-session` 随后把替换节点 splice 回**被折区间的原位置**，时间顺序不变。
 
+**触发线不是固定的 25 万 token**：默认是"上下文窗口的 `0.75`"，折到窗口的 `0.18` ✓
+窗口能解析出来就按比例走，`config.json` 里显式写了绝对值则绝对值优先 ✓
+详见 [配置](#配置) 里的解析顺序 ✓
+
 ### 写之前核对过的硬规则（全部来自真实源码，不是猜的）
 
 | 规则 | 出处 |
@@ -106,6 +110,8 @@ The one-line index below is extractive, not a rewritten summary ...
   "profile": true,
   "triggerSurfaceTokens": 250000,
   "targetSurfaceTokens": 180000,
+  "triggerRatio": 0.75,
+  "targetRatio": 0.18,
   "keepRecentNodes": 60,
   "minFoldNodes": 20,
   "minFoldTokens": 20000,
@@ -125,8 +131,10 @@ The one-line index below is extractive, not a rewritten summary ...
 | `enabled` | `false` | 总开关 ✓ `false` = 加载了但完全空转 |
 | `dryRun` | `true` | `true` = 只看只记，绝不写 |
 | `profile` | `true` | 每轮写一份体积剖析 |
-| `triggerSurfaceTokens` | `250000` | 可见历史超过它才折 |
-| `targetSurfaceTokens` | `180000` | 折到大约这么多就停 ✓ **必须够得着**（见下） |
+| `triggerSurfaceTokens` | `250000` | 绝对触发线，**兜底用**（见下面的解析顺序）✓ 写在 `config.json` 里就优先于 `triggerRatio` |
+| `targetSurfaceTokens` | `180000` | 绝对目标，**兜底用** ✓ 同上 ✓ **必须够得着**（见下） |
+| `triggerRatio` | `0.75` | 可见历史超过**上下文窗口的这个比例**才折 ✓ 窗口能解析出来、且没写绝对值时用它 |
+| `targetRatio` | `0.18` | 折到大约窗口的这个比例就停 |
 | `keepRecentNodes` | `60` | 最近的这么多节点永不折 |
 | `minFoldNodes` | `20` | 一次折得太少就不值当 |
 | `minFoldTokens` | `20000` | 同上，按 token 算 |
@@ -139,9 +147,36 @@ The one-line index below is extractive, not a rewritten summary ...
 | `memoryFeed` | `false` | 折完把同一份摘要 POST 到记忆库 |
 | `memoryFeedUrl` | — | 例：`http://127.0.0.1:7999/memory-eternal/api` |
 
-> ⚠️ **`targetSurfaceTokens` 必须够得着**：至少有 `keepRecentNodes` 个节点会留下，
+> ⚠️ **目标必须够得着**：至少有 `keepRecentNodes` 个节点会留下，
 > 换算成 token 就是一条下限 ✓ 目标低于这条下限**永远达不到** ⇒ 每轮都记 `no-safe-cut` ✓
 > （实测踩过：`keepRecentNodes: 9` + `targetSurfaceTokens: 2000` 就是这种自相矛盾）
+> 目标**大于等于触发线**同样永远够不着（折到目标就停，而 surface 一开始就高于触发线）⇒
+> 走的是同一条 `no-safe-cut`，没有为比例另造行为 ✓
+
+### 两个阈值是怎么算出来的
+
+`triggerSurfaceTokens` / `triggerRatio`（目标同理）**每轮按这个顺序、按 key 各自解析**：
+
+1. **`config.json` 里写了这个 key** ⇒ 用这个绝对值 ✓ 写了 `triggerSurfaceTokens: 300000`
+   就是 300000，窗口解析得出来也不改变它 ✓ 注意"写了"指的是**原始文件里存在这个 key**，
+   不是合并后的配置对象 —— `DEFAULTS` 里也带着这两个 key，用合并对象判断的话永远命中，
+   比例就永远轮不上 ✓
+2. **否则，窗口能解析出来** ⇒ `floor(窗口 × 比例)` ✓ 窗口取自
+   `ctx.llm.resolveModelInfo(provider, model, signal).context.contextWindow`，
+   和官方 `dsh-compaction-basic` 算自己那条线用的是同一个查询 ✓
+3. **否则** ⇒ 用出厂的绝对默认值，日志里写 `default` ✓
+
+**为什么默认是 0.75 / 0.18，而且必须压在官方那条线下面。**
+官方 `dsh-compaction-basic` 在 `thresholdRatio × contextWindow` 触发 —— 默认 `0.8 × 100 万` =
+80 万 —— 并保留 `0.16 × 窗口`（16 万）✓ 它的替代品是**模型写的摘要**，是有损的 ✓
+`0.75`（100 万窗口的 75 万）**刚好压在那条线之下**，这就是"让摘要器永远不触发"的办法；
+`0.18`（18 万）对应它的 0.16 ✓ 这两个默认值就是本项目自己那套绝对值（75 万 / 18 万，
+即 100 万窗口的 0.75 / 0.18）写成了比例，换个窗口也照样成立 ✓
+
+每一条 profile / 折叠日志都带着这些字段：`windowTokens`（解析到的窗口，没有就是 `null`）、
+`triggerSource` / `targetSource` = `absolute` | `ratio` | `default` ✓
+比例不在 `(0, 1)` 内（`0`、`1`、`1.5`、`"0.75"`、`null`）**不会抛错、也不会变成一条坏阈值**：
+按第 3 条兜底，并在同一行写 `triggerRatioInvalid` / `targetRatioInvalid` 说明原因 ✓
 
 ### 和官方压缩、以及和"叫 fold 的其他插件"的关系
 
@@ -152,7 +187,7 @@ The one-line index below is extractive, not a rewritten summary ...
 | 原文还在吗 | ✗ 只剩摘要 | ✓ 逐字写在 `$DSH_HOME/history-fold/archive/` | n/a |
 | 能找回来吗 | ✗ | ✓ 一条 `rg` 就行 | n/a |
 | 改的是什么 | surface（发给模型的东西） | surface（发给模型的东西） | **显示**（长消息在界面上折起来看） |
-| 触发线 | `thresholdRatio × contextWindow`，默认 80 万 | `triggerSurfaceTokens`，压在官方那条线下 | n/a |
+| 触发线 | `thresholdRatio × contextWindow`，默认 80 万 | `triggerRatio × contextWindow`（0.75 ⇒ 75 万），压在官方那条线下；写了绝对 `triggerSurfaceTokens` 仍然优先 | n/a |
 
 名字里带 `fold` 的插件，很多是**界面折叠**：把一条长消息在 UI 里折起来方便看，
 **请求体一个字节都不动** ✓ 本插件恰好相反 —— 完全不碰界面，
@@ -179,6 +214,14 @@ The one-line index below is extractive, not a rewritten summary ...
 - `archive-failed` —— 归档写不进去 ⇒ 这次不折
 - `error` —— 出错了（**一律放行**）
 
+以上每一行都带着本轮**实际用到**的阈值，不用猜走的是哪条路：
+
+- `trigger` / `target` —— 本轮真正用的两条线（token）
+- `windowTokens` —— 解析到的上下文窗口；解析不出来就是 `null`
+- `triggerSource` / `targetSource` —— `absolute`（`config.json` 里写了）/ `ratio`（`floor(窗口 × 比例)`）/ `default`（出厂绝对兜底）
+- `triggerRatioInvalid` / `targetRatioInvalid` —— 只在比例不可用、按第 3 条兜底时出现且为 `true`
+- `via` —— 哪条路拿到计量器、哪条路拿到 `llm`（例：`ctx.tokenMeter|llm:ctx.reflect.get/agent.options`）
+
 ## 折完之后怎么找回原文
 
 替换内容里带着归档文件路径 ✓ 直接用普通工具搜，**不需要任何新工具** ✓
@@ -191,14 +234,26 @@ rg -n "要找的词" "$env:USERPROFILE\.dsh\history-fold\archive\<会话id>.json
 ## 测试
 
 ```powershell
-npm test            # 两套都跑
+npm test            # 四套都跑
 npm run test:fold
 npm run test:profile
+npm run test:edge
+npm run test:ratio  # 窗口比例：解析顺序、兜底、非法比例
+npm run test:mutate # 故意塞回 10 个真实缺陷，要求每套都变红
 ```
 
 全离线 ✓ 不碰运行中的 DSH ✓ 不碰真实 `DSH_HOME` ✓（测试里把 `DSH_HOME` 指到临时目录）
+`ratio-tests` 用的 `llm` 是三行假对象 ✓ **不 import 任何真实 DSH 服务** ✓
 
-现行规模：`fold-tests` **15 项**、`profile-tests` **8 项** ✓
+现行规模：`fold-tests` **15 项**、`profile-tests` **8 项**、`edge-tests` **19 项**、
+`ratio-tests` **31 项**；变异测试 **10 / 10 全部被抓** ✓
+
+`ratio-tests` 覆盖：比例路径（`floor(窗口 × 比例)`，含非整数乘积向下取整）、
+绝对覆盖（写了 `triggerSurfaceTokens` / `targetSurfaceTokens` 时它赢，另一个 key 仍按比例）、
+窗口解析不出来的每种情形（没有 `ctx.llm`、`resolveModelInfo` 抛错、没有 `context`、
+窗口为 0 / 负数 / 小数 / 字符串、agent 上没有 provider+model）、非法比例（`0`、`1`、`1.5`、
+`"0.75"`、`null`、`-0.5`、`NaN`）、以及目标够不着时走既有的 `no-safe-cut`，
+外加三条取 `llm` 的路径（`ctx.llm` / `ctx.reflect.get` / `payload.agent.ctx.llm`）✓
 
 覆盖：无 `config.json` 必须 inert、关闭时不写不记、未达阈值不折、dry-run 不写、
 `surfaceOp`/`sourceEventSeqs`/切点平衡逐项校验、**归档必须先于折叠且正文逐字保留**、
@@ -227,7 +282,16 @@ npm run test:profile
 ## 已知边界
 
 - 默认阈值是按 100 万上下文窗口调的 ✓ 机制本身与适配器无关，
-  但**默认阈值不是通用的** ✗
+  但**出厂绝对兜底值不是通用的** ✗ —— 这正是加比例的原因：窗口能解析出来时，
+  两条线就跟着窗口走 ✓
+- **`ctx.llm` 这条取值路已经在真实 DSH 上跑通了** ✓（2026-10-12 实测，沙箱实例、`web` profile）
+  配置里只留比例、不放绝对键时，日志记的是
+  `windowTokens:1000000` / `trigger:750000` / `target:180000` /
+  `triggerSource:"ratio"` / `via:"ctx.reflect.get|llm:ctx.reflect.get/agent.options"`
+  —— 也就是说它走的是 `ctx.reflect.get` 拿到 `llm`、再从 `agent.options` 取 provider/model ✓
+  取值方式与 `resolveMeter()` 一致（先直接属性，再 `ctx.reflect.get`，再 `agent.ctx`），全程不抛错 ✓
+  万一你的 build 三条路都不通，日志里会是 `triggerSource: "default"`，
+  行为与加这个功能之前完全一致 ✓
 - 折叠确实减少了模型能看到的东西 ✓ 归档保证可找回，但**不是没代价**：
   读回一次要花一次 `rg` 往返 ✓
 - 目前**不与 `dsh-compaction-basic` 协同**，只是压在它的触发线之下 ✓

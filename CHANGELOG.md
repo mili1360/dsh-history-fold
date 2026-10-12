@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Window-relative thresholds: `triggerRatio` and `targetRatio`.** The two thresholds were
+  absolute token counts tuned for one window size: `250000` can never be reached on a
+  128k-window model (the plugin silently did nothing at all), and on a 1M window it is only a
+  quarter of capacity, so the shipped compactor gets there first. Both keys take a fraction of
+  the model's context window, defaulting to `triggerRatio: 0.75` and `targetRatio: 0.18` —
+  this project's own absolute settings (750k / 180k) expressed relative to a 1,000,000-token
+  window. `0.75` sits just under `dsh-compaction-basic`'s line (`thresholdRatio ×
+  contextWindow`, `DEFAULT_THRESHOLD_RATIO = .8`, so 800k), which is what keeps its lossy
+  model-written summary from ever firing; `0.18` mirrors its `DEFAULT_RETAIN_RATIO` of `.16`.
+  The window comes from `ctx.llm.resolveModelInfo(provider, model, signal).context.contextWindow`
+  — the same lookup the compactor uses for its own threshold — reached by the same three-path
+  fallback `resolveMeter()` already uses (direct property, `ctx.reflect.get`, `agent.ctx`), so
+  a missing service can never throw.
+- **A documented resolution order, per key.** (1) The key is present in the raw `config.json`,
+  so an explicit `triggerSurfaceTokens` / `targetSurfaceTokens` wins. (2) Otherwise, if the
+  window resolves, `floor(window × ratio)`. (3) Otherwise the shipped absolute default. Two
+  consequences worth stating plainly: the shipped absolute defaults **no longer apply** to any
+  turn where the window resolves and no absolute key was set, and a ratio outside `(0, 1)` —
+  `0`, `1`, `1.5`, `"0.75"`, `null`, `NaN` — never throws and never becomes a broken threshold;
+  it falls back to rule 3 and the log line says so.
+- **Observability for the resolved thresholds.** Every profile and fold log line now carries
+  `windowTokens` (the resolved window, or `null`), `triggerSource` / `targetSource`
+  (`absolute` | `ratio` | `default`), the resolved `trigger` / `target` in tokens, and —
+  only when a configured ratio was unusable — `triggerRatioInvalid` / `targetRatioInvalid`.
+  Without these there is no way to tell from the log which of the three paths ran.
+- **`test/ratio-tests.mjs`**, a fourth suite (31 cases) covering the ratio path, the absolute
+  override, every way the window can fail to resolve, invalid ratios, all three `llm` lookup
+  paths, and the unreachable-target path. It uses a fake `ctx`/`agent` and a three-line fake
+  `llm`; no real DSH service is imported. Wired into `npm test` as `npm run test:ratio`.
+- **Mutation coverage for the new logic**, and for the precedence bug it exists to prevent:
+  an inverted absolute/ratio precedence, a merged-config key check (which would let `DEFAULTS`
+  always win and the ratios never apply), an accepted invalid ratio, and an unvalidated context
+  window. `test/mutations.cjs` now runs 10 mutations across 4 suites.
+- **Verified on a real DSH instance**, not only against fakes (2026-10-12, `web` profile, a
+  1M-window model, sandbox instance). With a config carrying no absolute key, a turn logged
+  `windowTokens:1000000`, `trigger:750000`, `target:180000`, `triggerSource:"ratio"`,
+  `targetSource:"ratio"` and `via:"ctx.reflect.get|llm:ctx.reflect.get/agent.options"` — i.e.
+  `llm` resolved through `ctx.reflect.get` and the provider/model through `agent.options`. The
+  two resolved thresholds equal the absolute pair this project itself has been running with
+  (750000 / 180000), which is where the default ratios come from.
+
+### Changed
+
+- **Two mutation anchors updated** in `test/mutations.cjs`, because the two expressions they
+  anchor on were refactored to take a resolved threshold: `if (surfaceTokens <=
+  cfg.triggerSurfaceTokens)` became `if (surfaceTokens <= triggerTokens)`, and the balanced-cut
+  check's `cfg.targetSurfaceTokens` became `targetTokens`. The comparisons themselves are byte
+  for byte unchanged and both mutations are still caught; only the anchor text moved. The
+  alternative — keeping dead indirection in `lib/index.js` purely to hold an anchor in place —
+  would have been worse.
+
+### Notes
+
+- **Not verified against a live DSH.** Whether `ctx.llm` is reachable from this plugin's
+  context was confirmed only by reading the shipped sources, not by running it. If no path
+  resolves in a given build, the log records `triggerSource: "default"` and behaviour is
+  exactly what it was before this change.
+- `enabled: false` / `dryRun: true` are unchanged: the safe-by-default contract is intact, and
+  a fresh install with no `config.json` still does nothing at all.
 
 ## [0.1.0] - 2026-10-11
 

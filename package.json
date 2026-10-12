@@ -11,7 +11,8 @@
     "non-summary",
     "recoverable",
     "extractive-index",
-    "token-budget"
+    "token-budget",
+    "context-window-ratio"
   ],
   "license": "MIT",
   "author": "三文鱼",
@@ -39,10 +40,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/fold-tests.mjs && node test/profile-tests.mjs && node test/edge-tests.mjs",
+    "test": "node test/fold-tests.mjs && node test/profile-tests.mjs && node test/edge-tests.mjs && node test/ratio-tests.mjs",
     "test:fold": "node test/fold-tests.mjs",
     "test:profile": "node test/profile-tests.mjs",
     "test:edge": "node test/edge-tests.mjs",
+    "test:ratio": "node test/ratio-tests.mjs",
     "test:mutate": "node test/mutations.cjs",
     "test:all": "npm test && npm run test:mutate"
   },
