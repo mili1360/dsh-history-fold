@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mutation coverage for the new logic**, and for the precedence bug it exists to prevent:
   an inverted absolute/ratio precedence, a merged-config key check (which would let `DEFAULTS`
   always win and the ratios never apply), an accepted invalid ratio, and an unvalidated context
-  window. `test/mutations.cjs` now runs 10 mutations across 4 suites.
+  window. `test/mutations.cjs` now runs 11 mutations across 4 suites.
 - **Verified on a real DSH instance**, not only against fakes (2026-10-12, `web` profile, a
   1M-window model, sandbox instance). With a config carrying no absolute key, a turn logged
   `windowTokens:1000000`, `trigger:750000`, `target:180000`, `triggerSource:"ratio"`,
@@ -52,6 +52,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Hardening: `apply()` can no longer take a profile down.** Both registrations are now
+  guarded. A build that lacks `ctx.on` / `ctx.effect`, or that refuses the registration, gets
+  ONE line in `logs/history-fold.jsonl` (`mark: "deactivated"`, `reason:
+  "registration-failed"`, the failing `step`, and the error) and the plugin deactivates
+  instead of throwing out of `apply()` into the loader. The trigger was a real third-party
+  plugin (`cancanqiqi/dsh-human-subagent`) whose `apply()` threw
+  `Cannot read properties of undefined (reading 'register')` and stopped a whole DSH profile
+  from booting. A failure in the second registration also disposes the first, so
+  "deactivated" never leaves a half-live listener behind. Nothing on the success path
+  changed; `README.md` / `README.zh-CN.md` now carry a *Requirements / compatibility* section.
+- **Two regression tests for it**: a new case in `test/edge-tests.mjs` ("apply() returns
+  normally when the context is hostile, and records the deactivation", five hostile contexts
+  including missing services), and an 11th mutation in `test/mutations.cjs` that removes the
+  `ctx.on` guard. Verified by hand, not just by the green suite: with each guard removed
+  separately the new case goes red (`19 passed, 1 failed`), and with them restored it is green
+  again (`20 passed, 0 failed`). The mutation harness reports 11 caught / 0 skipped.
 - **Two mutation anchors updated** in `test/mutations.cjs`, because the two expressions they
   anchor on were refactored to take a resolved threshold: `if (surfaceTokens <=
   cfg.triggerSurfaceTokens)` became `if (surfaceTokens <= triggerTokens)`, and the balanced-cut

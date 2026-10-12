@@ -138,6 +138,38 @@ plugin uses.
 To remove it, delete the row you added and restart. Nothing else is left behind; the archive
 directory is the only thing this plugin creates.
 
+## Requirements / compatibility
+
+**After installing, confirm it actually works — a profile that boots is not proof.**
+A plugin can load cleanly, serve its routes and still break the host; we have seen exactly
+that. So the acceptance test is: **create a new session and send it one message**, then check
+`$DSH_HOME/logs/history-fold.jsonl` for a `profile` line (observer mode) or an
+`idle` / `would-fold` / `folded` line. If new sessions cannot be created at all, remove
+the mount line above and restart.
+
+Developed and tested against DSH **`0.1.0-rc.7`** — a **customised** build, not a stock
+upstream release. Another version may register its services or name its events differently:
+this plugin touches `ctx.on`, `ctx.effect`, `ctx.tokenMeter`, `ctx.reflect`, `ctx.llm` and the
+`agent/pre-step` event.
+
+If your build does not match, the plugin **deactivates and says so** — it does **not** stop the
+profile from booting. Nothing is registered, and one line lands in
+`logs/history-fold.jsonl`:
+
+```json
+{"mark":"deactivated","reason":"registration-failed","step":"services","error":"..."}
+```
+
+**If the profile will not start at all after installing**, remove the mounted lines from
+`<profile>/cordis.patch.yml` (or drop `"dsh-history-fold"` from `dsh.profile.bundles`, if that
+is how you installed it) and restart:
+
+```yaml
+- insert:
+    - id: dsh-history-fold
+      name: 'file:///path/to/dsh-history-fold/lib/index.js'
+```
+
 ## Configuration
 
 `$DSH_HOME/dsh-history-fold/config.json` (falling back to `~/.dsh/…`). **It is re-read on
@@ -284,7 +316,7 @@ npm run test:fold     # fold policy and the archive
 npm run test:profile  # the per-turn size profile
 npm run test:edge     # boundaries: thresholds, floors, odd surfaces, hostile config
 npm run test:ratio    # window-ratio thresholds: precedence, fallbacks, invalid ratios
-npm run test:mutate   # reintroduce ten real defects and require the suite to catch each
+npm run test:mutate   # reintroduce eleven real defects and require the suite to catch each
 npm run test:all      # npm test + mutation testing
 ```
 
@@ -295,17 +327,18 @@ They run fully offline: no DSH, no network, no API key, and a throwaway `DSH_HOM
 |---|---|---|
 | `fold-tests` | 15 | the fold itself: span, provenance, balance, archive-before-fold, the archive body fix, the fresh-install contract |
 | `profile-tests` | 8 | the per-turn size profile |
-| `edge-tests` | 19 | exact-threshold behaviour, unreachable targets, both worth-folding floors, `keepRecentNodes` extremes, unclosed tool pairs, empty/degenerate surfaces, a tiny digest budget, an unreachable feed, hostile and corrupt config, a second fold in one session |
+| `edge-tests` | 20 | exact-threshold behaviour, unreachable targets, both worth-folding floors, `keepRecentNodes` extremes, unclosed tool pairs, empty/degenerate surfaces, a tiny digest budget, an unreachable feed, hostile and corrupt config, a hostile `ctx` (missing or refusing services), a second fold in one session |
 | `ratio-tests` | 31 | the ratio path, the absolute override, every way the window can fail to resolve, invalid ratios, and the unreachable-target path |
 
 **Mutation testing** is the reason to trust the green. A passing suite proves nothing on its
 own — this project shipped a suite that ran *zero* assertions for weeks while printing
-`13 passed, 0 failed`. `npm run test:mutate` reintroduces ten defects that have really
+`13 passed, 0 failed`. `npm run test:mutate` reintroduces eleven defects that have really
 existed or could plausibly exist (the dropped tool-result body, live-by-default settings, a
 removed mid-turn guard, an ignored worth-folding floor, a strict trigger comparison, a dropped
 tool-pairing balance requirement, an inverted absolute/ratio precedence, a merged-config key
 check that would let `DEFAULTS` always win, an accepted invalid ratio, an unvalidated context
-window) and fails unless the suite goes red for every one. Current result: **10 / 10**.
+window, a removed registration guard that would let a hostile `ctx` throw out of `apply()`) and
+fails unless the suite goes red for every one. Current result: **11 / 11**.
 
 > **For contributors:** `test()` **must** `await fn()`, in every suite. A synchronous harness
 > reports `ok` before any async assertion runs and lets the script reach `process.exit(0)`

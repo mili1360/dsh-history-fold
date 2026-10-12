@@ -81,6 +81,15 @@ const MUTATIONS = [
     from: "      if (typeof contextWindow === 'number' && Number.isFinite(contextWindow) && Number.isInteger(contextWindow) && contextWindow > 0) {",
     to: '      if (true) {',
   },
+  {
+    name: 'apply() stops guarding its registration (a hostile ctx throws out of the loader)',
+    // This is the failure that took a whole profile down for a third-party plugin: a service
+    // that is missing or refuses the call must cost this plugin its activation, never the boot.
+    from: "  try {\n    disposers.push(ctx.on('agent/pre-step', onPreStep))\n  } catch (err) {\n"
+      + "    logLine({ mark: 'deactivated', reason: 'registration-failed', step: 'agent/pre-step', error: String(err && err.message ? err.message : err) })\n"
+      + '    return\n  }\n',
+    to: "  disposers.push(ctx.on('agent/pre-step', onPreStep))\n",
+  },
 ];
 
 function runSuite(file) {

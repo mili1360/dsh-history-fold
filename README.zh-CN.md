@@ -279,6 +279,35 @@ npm run test:mutate # 故意塞回 10 个真实缺陷，要求每套都变红
 - 想临时关掉：把 `config.json` 里 `enabled` 改回 `false`（热读，不用重启）
 - 想彻底卸掉：删掉上面那两行，重启 ✓ 归档目录是它唯一留下的东西
 
+## 要求 / 兼容性
+
+**装上之后要确认它真的在工作** ✓ 光"profile 起得来"不算数 ✗
+插件可能加载得好好的、路由也活着，却把宿主弄坏 —— 我们真踩过 ✓
+验收动作: **新建一个会话、发一条消息** ✓
+然后看 `$DSH_HOME/logs/history-fold.jsonl` 里有没有 `profile` 行（观察模式），
+或 `idle` / `would-fold` / `folded` 行 ✓
+如果连新会话都建不出来 ⇒ 把上面那行挂载删掉、重启 ✓
+
+针对 **DSH `0.1.0-rc.7`** 开发并测试 —— 这是一个**魔改版**，不是官方原版。别的版本可能把服务
+或事件名改掉：本插件用到 `ctx.on`、`ctx.effect`、`ctx.tokenMeter`、`ctx.reflect`、`ctx.llm`
+和 `agent/pre-step` 事件。
+
+版本对不上时，插件**不会**让 profile 起不来 ✓ 它会直接**停用**，并在
+`logs/history-fold.jsonl` 里留一行：
+
+```json
+{"mark":"deactivated","reason":"registration-failed","step":"services","error":"..."}
+```
+
+**万一装上之后 profile 根本起不来**：把 `<profile>/cordis.patch.yml` 里挂载它的那几行删掉
+（若你是用 `dsh.profile.bundles` 装的，就把数组里的 `"dsh-history-fold"` 去掉），然后重启：
+
+```yaml
+- insert:
+    - id: dsh-history-fold
+      name: 'file:///path/to/dsh-history-fold/lib/index.js'
+```
+
 ## 已知边界
 
 - 默认阈值是按 100 万上下文窗口调的 ✓ 机制本身与适配器无关，

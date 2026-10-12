@@ -388,6 +388,64 @@ await test('two folds in one session: the second one folds the previous marker',
   assert.ok(second.sourceEventSeqs.includes(markerSeq), 'the second fold must shadow the first marker')
 })
 
+// ---------------------------------------------------------------- hostile contexts
+
+// The proven failure this guards against: a third-party plugin (cancanqiqi/dsh-human-subagent)
+// called a service method that does not exist on the loaded build, the exception propagated
+// out of apply() into the loader, and the WHOLE profile refused to start. Being merely
+// incompatible must instead cost this plugin its own activation -- nothing more.
+await test('apply() returns normally when the context is hostile, and records the deactivation', async () => {
+  resetLog()
+  writeConfig({ ...BASE, enabled: true })
+
+  // Each hostile context is a shape a DSH build could really present: a missing service (a
+  // renamed or dropped one) or one that refuses the call. `step` is asserted too: the log has
+  // to name the service that failed, or the user cannot tell an incompatible build from a bug.
+  const probes = []
+  const hostile = [
+    { label: 'ctx.on throws', step: 'agent/pre-step', ctx: { on() { throw new Error('boom-on') }, effect() {} } },
+    { label: 'ctx.on absent', step: 'services', ctx: { effect() {} } },
+    {
+      label: 'ctx.effect throws',
+      step: 'ctx.effect',
+      ctx: {
+        on(event, fn) { assert.equal(event, 'agent/pre-step'); assert.equal(typeof fn, 'function'); return () => probes.push('disposed') },
+        effect() { throw new Error('boom-effect') },
+      },
+    },
+    { label: 'ctx.effect absent', step: 'services', ctx: { on() { return () => {} } } },
+    { label: 'ctx is null', step: 'services', ctx: null },
+  ]
+
+  let seen = 0
+  for (const h of hostile) {
+    let threw = null
+    try {
+      plugin.apply(h.ctx)
+    } catch (err) {
+      threw = err
+    }
+    assert.equal(threw, null, 'apply() must NOT throw with a hostile ctx: ' + h.label)
+    const lines = logLines().filter((l) => l.mark === 'deactivated')
+    assert.equal(lines.length, seen + 1, 'each hostile ctx must leave exactly ONE deactivation line: ' + h.label)
+    assert.equal(lines[lines.length - 1].reason, 'registration-failed', h.label)
+    assert.equal(lines[lines.length - 1].step, h.step, 'the log must name the step that failed: ' + h.label)
+    seen = lines.length
+  }
+
+  // Deactivating means "not activated", not "half activated": the listener that ctx.effect
+  // could not take charge of must have been handed back.
+  assert.deepEqual(probes, ['disposed'], 'a listener registered before a later step failed must be disposed')
+
+  // And with everything present the very same apply() still wires the hook up normally: the
+  // guard is a failure path, not a new condition on the happy path.
+  resetLog()
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'the happy path must still fold')
+  assert.equal(lastMark().mark, 'folded')
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)
