@@ -384,6 +384,19 @@ Two limits worth knowing:
 - It does not (yet) coordinate with `dsh-compaction-basic`; it simply stays below its
   trigger.
 
+## Related plugins
+
+Three small DSH plugins, each aimed at one part of the same problem — a session that gets
+expensive and slow the longer it runs:
+
+- **[dsh-session-vacuum](https://github.com/mili1360/dsh-session-vacuum)** — deletes the dead
+  streaming fragments out of session logs at startup, so loading a long session stops expanding
+  into gigabytes. (Different layer from this plugin: that one shrinks the log on disk, this one
+  shrinks what each request carries.)
+- **[dsh-proactive](https://github.com/mili1360/dsh-proactive)** — wakes the agent when a long
+  background task finishes after the turn has ended, so it reports back on its own.
+
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

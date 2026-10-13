@@ -327,6 +327,17 @@ npm run test:mutate # 故意塞回 10 个真实缺陷，要求每套都变红
   读回一次要花一次 `rg` 往返 ✓
 - 目前**不与 `dsh-compaction-basic` 协同**，只是压在它的触发线之下 ✓
 
+## 相关插件
+
+同一套东西，三个插件各治一头 —— 都是"会话越跑越长、越贵越慢"这件事：
+
+- **[dsh-session-vacuum](https://github.com/mili1360/dsh-session-vacuum)** —— 开机后把会话日志里
+  "定稿后没人读"的流式碎片删掉，长会话加载时不再膨胀成几个 GB ✓
+  （和本插件不在同一层：那个减的是磁盘上的日志，本插件减的是**每轮请求带的 token**）
+- **[dsh-proactive](https://github.com/mili1360/dsh-proactive)** —— 长任务在 agent 回合结束后才跑完时，
+  把它叫醒主动汇报 ✓
+
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。
