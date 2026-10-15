@@ -493,6 +493,143 @@ await test('tier index: fold-pointer lines survive digest sampling', async () =>
   assert.ok(body.includes(oldTier), 'the nesting must name the older tier file')
 })
 
+// ------------------------------------------------- 0.2.0 host shapes (2026-10-15)
+
+// A 0.2.0-shaped session: the log is POSITIONAL (`eventAt(seq)` is `log[seq]`), there is no
+// `events` array, and append REJECTS the old replace key set exactly the way dsh-session's
+// isReplaceOp does. Both differences were observed on 0.2.0-rc.2 in sandbox #2.
+function toModern(session, appended) {
+  const log = session.events.slice()
+  return {
+    header: session.header,
+    surface: session.surface,
+    log,
+    eventAt(seq) { return log[seq] },
+    snapshotEvents() { return Object.freeze(log.slice()) },
+    append(type, data, opts) {
+      const op = opts && opts.surfaceOp
+      if (!op || !Object.hasOwn(op, 'startSeq') || !Object.hasOwn(op, 'endSeq')) {
+        throw new Error('session event "' + type + '" carries an invalid replace surfaceOp')
+      }
+      appended.push({ type, data, opts })
+    },
+  }
+}
+
+await test('0.2.0 host: events come from the positional log, so no node is "unknown"', async () => {
+  resetLog()
+  writeConfig({ ...BASE, profile: true })
+  const { session, meter } = buildSession(makeSteps(20))
+  await runHandler(toModern(session, []), meter)
+  const prof = logLines().filter((line) => line.mark === 'profile').pop()
+  assert.ok(prof, 'a profile line must be written')
+  assert.ok(!Object.hasOwn(prof.byType, 'unknown'), 'no node may be unknown: ' + JSON.stringify(prof.byType))
+  assert.ok(prof.totalBytes > 0, 'the profile must be able to size the nodes')
+})
+
+await test('0.2.0 host: the fold is appended with startSeq/endSeq', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 9 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(toModern(session, appended), meter)
+  assert.equal(appended.length, 1, 'must fold on a 0.2.0-shaped session')
+  const op = appended[0].opts.surfaceOp
+  assert.ok(Object.hasOwn(op, 'startSeq'), 'the 0.2.0 replace op needs startSeq')
+  assert.ok(Object.hasOwn(op, 'endSeq'), 'the 0.2.0 replace op needs endSeq')
+  assert.equal(op.op, 'replace')
+  assert.equal(Object.keys(op).length, 3, 'isReplaceOp demands exactly three keys')
+  assert.equal(lastMark().mark, 'folded')
+  assert.equal(lastMark().surfaceOpKeys, 'startSeq', 'the log must name the shape that worked')
+})
+
+await test('0.1.x host: the fold is still appended with start/end', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 9 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+  const op = appended[0].opts.surfaceOp
+  assert.ok(Object.hasOwn(op, 'start'), 'the 0.1.x replace op needs start')
+  assert.ok(Object.hasOwn(op, 'end'), 'the 0.1.x replace op needs end')
+  assert.equal(Object.keys(op).length, 3, 'isReplaceOp demands exactly three keys')
+  assert.equal(lastMark().surfaceOpKeys, 'start', 'the log must name the shape that worked')
+})
+
+await test('0.2.0 host: the protected system head is never folded', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 9 })
+  const entries = [
+    {
+      type: 'system/message',
+      tokens: 800,
+      data: { id: 'sys', role: 'system', content: [{ type: 'text', text: 'the system prompt' }], source: { kind: 'system' } },
+    },
+    ...makeSteps(20),
+  ]
+  const { session, meter, appended } = buildSession(entries)
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'must fold the run after the head')
+  const opts = appended[0].opts
+  const startSeq = Object.hasOwn(opts.surfaceOp, 'startSeq') ? opts.surfaceOp.startSeq : opts.surfaceOp.start
+  assert.notEqual(startSeq, 0, 'the fold must never start at the protected node 0')
+  assert.equal(startSeq, 1, 'the fold must start immediately after the head')
+  assert.ok(!opts.sourceEventSeqs.includes(0), 'the head must never be shadowed')
+})
+
+// v4 RETIRES the {kind:'plugin', plugin:X} wrapper: the native admission check throws
+// `format v4 message requires a producer-owned source kind`, and the migration rewrites that
+// wrapper to `plugin:<name>`. The throw lands at ROW ADMISSION (when the log is written), not
+// at append, so it wedges the turn instead of failing loudly.
+await test('0.2.0 host: the folded message carries a producer-owned source kind', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 9 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(toModern(session, appended), meter)
+  assert.equal(appended.length, 1, 'must fold')
+  assert.deepEqual(appended[0].data.source, { kind: 'plugin:dsh-history-fold' })
+})
+
+await test('0.1.x host: the folded message keeps the plugin-wrapper source', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 9 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'must fold')
+  assert.deepEqual(appended[0].data.source, { kind: 'plugin', plugin: 'dsh-history-fold' })
+})
+
+await test('0.2.0 host: a v4-spelled previous fold is still recognised as a pointer', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 6, targetSurfaceTokens: 3000, minFoldNodes: 1 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  const modern = toModern(session, appended)
+  await runHandler(modern, meter)
+  assert.equal(appended.length, 1)
+
+  const firstText = appended[0].data.content[0].text
+  const firstSource = appended[0].data.source
+  const op = appended[0].opts.surfaceOp
+  const si = modern.surface.nodes.indexOf(op.startSeq)
+  const ei = modern.surface.nodes.indexOf(op.endSeq)
+  // The 0.2.0 log is positional, so a new event's seq is its array index.
+  const markerSeq = modern.log.length
+  meter.setTokens(markerSeq, 20000)
+  modern.log.push({
+    seq: markerSeq,
+    type: 'user/message',
+    data: { id: 'marker', role: 'user', content: [{ type: 'text', text: firstText }], source: firstSource },
+  })
+  modern.surface.nodes.splice(si, ei - si + 1, markerSeq)
+
+  await runHandler(modern, meter)
+  assert.equal(appended.length, 2, 'a second fold must be possible')
+  const secondText = appended[1].data.content[0].text
+  assert.ok(
+    /\[0\] fold-pointer seq=\d+:/.test(secondText),
+    'a v4-spelled previous fold must become a pointer: ' + secondText.slice(0, 240)
+  )
+})
+
 // ---------------------------------------------------------------- hostile contexts
 
 // The proven failure this guards against: a third-party plugin (cancanqiqi/dsh-human-subagent)

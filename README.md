@@ -184,6 +184,25 @@ upstream release. Another version may register its services or name its events d
 this plugin touches `ctx.on`, `ctx.effect`, `ctx.tokenMeter`, `ctx.reflect`, `ctx.llm` and the
 `agent/pre-step` event.
 
+### DSH 0.2.0 (`0.2.0-rc.2`) — supported
+
+Verified on 0.2.0 end to end: three consecutive folds, every turn completing, the folded
+message persisted to `session.v4.jsonl.zstd`, the session reloaded after a restart and kept
+folding, and the nested tier link present on disk.
+
+Four of its API changes had to be handled, and three of them fail **silently**:
+
+| what changed | 0.1.x | 0.2.0 | if you get it wrong |
+|---|---|---|---|
+| event accessor | `session.events`, entries carry `seq` | **no such member**; the log is positional (`eventAt(seq)` is `log[seq]`), plus `snapshotEvents()` | every node reads as `unknown` / 0 bytes, no cut is ever balanced, `no-safe-cut` forever — **no error** |
+| surface-replace range | `{op:'replace', start, end}` | `{op:'replace', **startSeq, endSeq**}` | `isReplaceOp` **throws**: the fold is rejected |
+| surface head | no system message in the surface | **node 0 is the system prompt and is protected** | any replace reaching node 0 **throws**: "may be rewritten only by a system/message over exactly that node" |
+| message `source` | `{kind:'plugin', plugin:X}` | **that wrapper is retired**; a message needs a producer-owned kind — `plugin:<name>` for a third-party plugin | the append **succeeds**, then ROW ADMISSION throws when the log is written ⇒ the turn **never ends**, the session stops persisting, and every later turn hangs too. Nothing is logged |
+
+The plugin picks the replace shape and the source spelling by host, and starts the fold *after*
+the protected head; the head's tokens stay in the reach-the-target arithmetic. Log lines name
+what was used (`surfaceOpKeys`) and how many leading nodes were skipped (`protectedCount`).
+
 If your build does not match, the plugin **deactivates and says so** — it does **not** stop the
 profile from booting. Nothing is registered, and one line lands in
 `logs/history-fold.jsonl`:

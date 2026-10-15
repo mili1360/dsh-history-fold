@@ -342,6 +342,24 @@ npm run test:mutate # 故意塞回 10 个真实缺陷，要求每套都变红
 或事件名改掉：本插件用到 `ctx.on`、`ctx.effect`、`ctx.tokenMeter`、`ctx.reflect`、`ctx.llm`
 和 `agent/pre-step` 事件。
 
+### DSH 0.2.0（实测 `0.2.0-rc.2`）—— 已支持
+
+0.2.0 上完整验证过：连折三次、**每一轮都正常结束**、折叠消息**写进了盘上的
+`session.v4.jsonl.zstd`**、**重启后会话重载成功并继续折**、磁盘上的层索引里也有套娃指针 ✓
+
+0.2.0 改了四处 API，其中**三处是静默失败**：
+
+| 改了什么 | 0.1.x | 0.2.0 | 写错的后果 |
+|---|---|---|---|
+| 读事件 | `session.events`，每条自带 `seq` | **没有这个成员**；日志是**位置数组**（`eventAt(seq)` 就是 `log[seq]`），另有 `snapshotEvents()` | 每个节点读成 `unknown` / 0 字节 ⇒ 永远找不到安全切点 ⇒ **永远 `no-safe-cut`，而且不报任何错** |
+| 折叠范围的键 | `{op:'replace', start, end}` | `{op:'replace', **startSeq, endSeq**}` | `isReplaceOp` **直接抛错**，折叠被拒 |
+| 表面头部 | 表面里没有系统消息 | **node 0 是系统提示，受保护** | 任何碰到 node 0 的 replace **直接抛错**："may be rewritten only by a system/message over exactly that node" |
+| 消息的 `source` | `{kind:'plugin', plugin:X}` | **这个包装已退役**；消息必须带**生产者自己的**类型名 —— 第三方插件是 `plugin:<名字>` | `append` **成功**，然后**写盘时的行准入**抛错 ⇒ **那一轮永远不结束**、会话不再落盘、之后每一轮都卡死。**宿主一个字都不报** |
+
+插件会**按宿主自动选** replace 的键形状和 source 拼写，并且**从受保护头部之后开始折**；
+头部的 token 会留在"够不够得着目标"的算术里。日志行会写明用了哪种形状（`surfaceOpKeys`）
+和跳过了几个前缀节点（`protectedCount`）。
+
 版本对不上时，插件**不会**让 profile 起不来 ✓ 它会直接**停用**，并在
 `logs/history-fold.jsonl` 里留一行：
 

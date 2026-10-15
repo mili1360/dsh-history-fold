@@ -5,6 +5,56 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-15
+
+### Fixed
+
+- **Four DSH 0.2.0 API changes are handled** (found live on `0.2.0-rc.2`, sandbox #2 /
+  port 3082, where a fold really does get applied):
+  1. **The event accessor moved.** 0.1.x exposes `session.events`, an array whose entries carry
+     their own `seq`. 0.2.0 has no such member (only a private `eventsSnapshot`); its log is
+     POSITIONAL — `eventAt(seq)` is literally `log[seq]` — with `snapshotEvents()` for a frozen
+     copy. `eventMap()` now tries all three. Before the fix the profile line read
+     `byType:{"unknown":{"n":20,"bytes":0}}`: every node unresolvable, which makes
+     `balancedCuts` refuse every cut, so the plugin logged `no-safe-cut` forever and **never
+     folded once** — with no error anywhere.
+  2. **The surface-replace range keys were renamed.** 0.1.x wants `{op:'replace', start, end}`;
+     0.2.0's `isReplaceOp` wants exactly `{op, startSeq, endSeq}` and **throws** on anything
+     else. Both validations run before the event reaches the log, so `appendFold()` picks the
+     shape by host (`session.events` present ⇒ 0.1.x) and keeps the other as a fallback; the
+     log line records which one worked as `surfaceOpKeys`.
+  3. **0.2.0 protects node 0.** It puts the system prompt in the surface and refuses any
+     replace that reaches it (`dsh-session`: "node 0 holds the system prompt and may be
+     rewritten only by a system/message over exactly that node"). The fold now starts after
+     that head, and the head's tokens stay in the reach-the-target arithmetic — folding below
+     the system prompt's own size is legitimately `no-safe-cut`.
+
+  Four new edge tests pin these (positional log, `startSeq`/`endSeq`, the old `start`/`end`
+  shape, and the protected head). Suite: 81 passed (was 77).
+
+  4. **v4 RETIRES the `{kind:'plugin', plugin:X}` message source — and refuses it at ROW
+     ADMISSION, not at append.** `dsh-session-format-v3-to-v4` states it outright:
+     `format v4 message requires a producer-owned source kind` (its `source()`, which rejects
+     `kind === 'plugin'`), and its own migration rewrites that wrapper into the producer's kind,
+     which for a third-party plugin is **`plugin:<name>`** (`producerKind()`, `:92`:
+     `return \`plugin:${plugin}\``). The failure is the worst kind: `session.append` returns
+     normally, the archive and tier file are written, the new surface is live — and then the
+     turn never ends. `sessionStats.turns` stops incrementing, `projections.asOfSeq` runs ahead
+     of the persisted log, `session.v4.jsonl.zstd` is never rewritten again, and **every later
+     turn on that session hangs too**. Nothing is logged by the host, and the same fold with
+     `source.kind === 'user'` completed every turn — that is how the field was isolated.
+     `foldSource()` now emits `plugin:<name>` on v4 and keeps the old wrapper on 0.1.x, and
+     `foldMessageOf()` recognises BOTH spellings (without that, a v4-spelled earlier fold is not
+     recognised, so the nesting silently never happens — `subTiers` stays 0).
+
+  Seven new edge tests pin these. Suite: 84 passed (was 77).
+
+  Verified end to end on `0.2.0-rc.2` (sandbox #2, port 3082): three consecutive folds, every
+  turn completing (`turn/end` for turns 1–19), the archive and tier files written, the folded
+  message **persisted** to `session.v4.jsonl.zstd`, the session **reloaded after a restart and
+  kept folding**, and the nested tier link present on disk (`fold-pointer` inside
+  `## older tier files`).
+
 ## [0.2.0] - 2026-10-15
 
 ### Added
