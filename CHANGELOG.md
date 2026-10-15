@@ -5,9 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-15
 
 ### Added
+
+- **Nested tiered index: a path inside a path.** The in-context index is sampled once it
+  overflows `digestMaxChars`, and the sampling step is capped at 64 — so the more often a
+  session folds, the coarser the index of its oldest spans becomes, ending at "somewhere in
+  seqs A..B". Every fold now also writes the **unsampled** index of its range to
+  `<indexDir>/<session>/f<start>-<end>.md` and leaves only that path in context. Each folded
+  message carries a machine-readable marker (`[fold-index] seqs=A..B messages=N file=<path>`),
+  so when it is itself folded later it becomes a **pointer line** instead of a 160-character
+  stub of an index — and that pointer line is **never sampled away**, because dropping it would
+  orphan every older span. A tier file also lists the tier files of the older folds it covers
+  (`## older tier files`), so the chain context → tier → older tier → raw archive is walkable.
+  New keys `indexTree` (default `true`), `indexDir` (`history-fold/index`) and `indexFull`
+  (default `true`). A failed index write is logged as `index-failed` and does **not** block the
+  fold: the archive already holds every byte, and the message then points at the raw archive.
+  Three new edge tests: the tier file is written and named, the second fold nests the first
+  tier, and fold-pointer lines survive sampling (baseline 74 tests → 77; mutation suite still
+  11/11).
 
 - **Window-relative thresholds: `triggerRatio` and `targetRatio`.** The two thresholds were
   absolute token counts tuned for one window size: `250000` can never be reached on a

@@ -83,6 +83,38 @@ need, then search the archive for the exact text. Do not guess about folded cont
 If the index would exceed `digestMaxChars` it samples every *n*-th line rather than
 truncating, and says so.
 
+## Nested paths: a path inside a path
+
+The in-context index is **sampled** once it overflows, and the sampling step is capped at 64 —
+so the more often a session folds, the coarser the index of its oldest spans becomes, until an
+old span is reduced to "somewhere in seqs A..B". That is the part that does not scale.
+
+So every fold now does one more thing: it writes the **unsampled** index of the range to disk
+and leaves only its **path** in context.
+
+```
+the folded message in context
+  |- path -> $DSH_HOME/history-fold/index/<session>/f100-4500.md  <- full index of that range
+  |            \-- path -> f20-99.md                              <- an earlier fold's full index
+  |                         \-- path -> f0-19.md
+  \-- path -> $DSH_HOME/history-fold/archive/<session>.jsonl      <- the raw text of everything
+```
+
+Two rules make the chain hold:
+
+1. **Each folded message carries a machine-readable marker:**
+   `[fold-index] seqs=A..B messages=N file=<tier index path>`. When that message is itself
+   folded later, the marker is parsed back out — so the older span is represented by a
+   **pointer**, not by a 160-character stub of an index.
+2. **That line is never sampled away.** Sampling drops ordinary message lines only. Dropping a
+   fold-pointer would silently *orphan* everything older than it: nothing left in context
+   could reach it.
+
+Every tier file is self-contained on disk, and it lists the tier files of any **older** folds
+that it covers (`## older tier files`). Context keeps the shortest layer; walking down the
+paths reaches the raw text. Reading a tier file costs nothing until it is read — and it is
+never read unless it is needed.
+
 **Measured** on a real 1,210-turn session (surface 213,919 tokens):
 
 | | |
@@ -191,6 +223,9 @@ every turn**, so edits apply without a restart.
 | `archiveDir` | `history-fold/archive` | Relative to `$DSH_HOME`. |
 | `digestMaxChars` | `30000` | Cap on the in-context index. Over budget ⇒ sample, never truncate. |
 | `digestLineChars` | `160` | Characters of each sampled message shown in the index. |
+| `indexTree` | `true` | Write the tier index and name its path in context. Off ⇒ the old sample-only behaviour. |
+| `indexDir` | `history-fold/index` | Tier index directory, relative to `$DSH_HOME`. |
+| `indexFull` | `true` | Write the **unsampled** index to disk. Off ⇒ collect pointers but write no new file. |
 | `onlyAtTurnStart` | `true` | Fold only before a turn's first step, never mid-turn. |
 | `logFile` | `logs/history-fold.jsonl` | Relative to `$DSH_HOME`. |
 | `memoryFeed` | `false` | Post the same digest to a memory service after each fold. |
@@ -307,6 +342,9 @@ of the three paths ran:
 - **Turn boundary only.** `onlyAtTurnStart` keeps a fold from ever landing mid-turn.
 - **Nothing is paraphrased.** The index is extraction; only the pointer message is
   synthetic, and it is labelled `source.kind = 'plugin'`.
+- **A failed index write never blocks a fold.** The archive is written first and holds every
+  byte, so an index error is logged as `index-failed` and the fold proceeds; the message then
+  names the raw archive instead of a tier file.
 
 ## Tests
 

@@ -83,6 +83,39 @@ The one-line index below is extractive, not a rewritten summary ...
 
 索引超预算时**抽样**（每 n 条取一条）而不是截断 ✓ 并如实写明抽样比例 ✓
 
+## 分层索引：路径里有路径（2026-10-15）
+
+上下文里那份索引超预算就**抽样**，而抽样步长**封顶在 64** ⇒ 折得越多，越老的那段索引越粗，
+最后退化成「seqs A..B 里大概有东西」✗
+
+所以每次折叠都多做一件事：把**没抽样的完整索引**写到磁盘，上下文里只留它的**路径** ✓
+
+```
+上下文里那条折叠消息
+  |- 路径 -> $DSH_HOME/history-fold/index/<会话id>/f100-4500.md   <- 该段的完整索引（不抽样）
+  |            \-- 路径 -> f20-99.md                             <- 更早那次折叠的完整索引
+  |                         \-- 路径 -> f0-19.md
+  \-- 路径 -> $DSH_HOME/history-fold/archive/<会话id>.jsonl       <- 全部原文
+```
+
+两条关键规则：
+
+1. **折叠消息里带一行机器可读的标记** ✓
+   `[fold-index] seqs=A..B messages=N file=<层索引路径>`
+   ⇒ 下次它自己被折掉时能被解析出来，**而不是被截成 160 字符的桩** ✓
+2. **这一行永不被抽样掉** ✓（抽样只抽普通消息行）
+   ⇒ 否则它盖住的那段更老的记录就成了**孤儿** —— 上下文里再也没有路能走到它 ✗
+
+于是每一层索引都靠自己那份磁盘文件活着 ✓ 上下文里只留**最短的这一层** ✓
+打开一份层索引，能看到它盖住的**更老的层索引路径**（`## older tier files`）⇒
+一层层往下走，最终到原文归档 ✓
+
+**读它不花上下文** ✓ —— 不读就等于不存在，读了才付费 ✓
+
+> ⚠️ 与官方压缩的区别仍在这里：官方每次都**重新写一份摘要**（本机实测一个会话压了 17 次，
+> 每次输入都带着上一份摘要，输出新的把它盖掉）⇒ 老信息被反复重写 ✗
+> 而这里是**写盘一次 + 留路径**，落盘的东西此后不再被动过 ✓
+
 ## 安全网
 
 | 机制 | 作用 |
@@ -90,6 +123,7 @@ The one-line index below is extractive, not a rewritten summary ...
 | **折之前先归档** | 被折掉的每一条消息的**全文**写进 `$DSH_HOME/history-fold/archive/<会话id>.jsonl` ✓ |
 | **归档失败就不折** | 写归档抛异常 ⇒ 直接放弃这次折叠 ✓ 宁可慢也不丢 ✓ |
 | **只留抽取式索引** | 替换内容**不是模型写的摘要** ✓ 没有 LLM 参与 ✓ |
+| **层索引写失败不挡折叠** | 归档里已有全文 ⇒ 索引写失败只记一行 `index-failed`，照常折 ✓ 消息改指向原文归档 ✓ |
 | **只动最老的一段** | 最近的 `keepRecentNodes` 个节点永不触碰 ✓ |
 | **切点必须配对平衡** | 有未闭合的工具调用时绝不切 ✓ |
 | **只在一轮开头折** | 步骤中间绝不折 ✓ |
@@ -121,6 +155,9 @@ The one-line index below is extractive, not a rewritten summary ...
   "archiveDir": "history-fold/archive",
   "digestMaxChars": 30000,
   "digestLineChars": 160,
+  "indexTree": true,
+  "indexDir": "history-fold/index",
+  "indexFull": true,
   "onlyAtTurnStart": true
 }
 ```
@@ -144,6 +181,9 @@ The one-line index below is extractive, not a rewritten summary ...
 | `archiveDir` | `history-fold/archive` | 相对 `$DSH_HOME` |
 | `digestMaxChars` | `30000` | 上下文里那份索引的上限 ✓ 超了**抽样不截断** |
 | `digestLineChars` | `160` | 索引里每条显示多少字符 |
+| `indexTree` | `true` | 写层索引、并把路径放进上下文 ✓ 关掉就退回"只有抽样索引"的旧行为 |
+| `indexDir` | `history-fold/index` | 层索引目录，相对 `$DSH_HOME` |
+| `indexFull` | `true` | 写**不抽样**的完整索引到磁盘 ✓ 关掉则只收集指针、不落新文件 |
 | `onlyAtTurnStart` | `true` | 只在一轮开头折 |
 | `logFile` | `logs/history-fold.jsonl` | 相对 `$DSH_HOME` |
 | `memoryFeed` | `false` | 折完把同一份摘要 POST 到记忆库 |
@@ -232,6 +272,14 @@ The one-line index below is extractive, not a rewritten summary ...
 ```powershell
 rg -n "要找的词" "$env:USERPROFILE\.dsh\history-fold\archive\<会话id>.jsonl"
 ```
+
+**更老的东西怎么找**（2026-10-15 起）：上下文里那条折叠消息还会给出**层索引路径** ✓
+
+1. 先读它给的那份层索引（`...\history-fold\index\<会话id>\f<起始seq>-<结束seq>.md`）
+2. 那份文件里 `## older tier files` 一节列着它盖住的**更早的层索引路径** ⇒ 一层层往下走
+3. 走到 `## message index` 里想找的那条，拿到 `seq`，再去归档里搜那条原文 ✓
+
+每一层都是普通 markdown ✓ 用 `read` / `rg` 就行 ✓ **不读不花上下文** ✓
 
 ## 测试
 

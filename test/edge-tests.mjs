@@ -122,6 +122,7 @@ function archivePath() {
 function resetLog() {
   fs.rmSync(path.join(tmp, 'logs'), { recursive: true, force: true })
   fs.rmSync(path.join(tmp, 'history-fold', 'archive'), { recursive: true, force: true })
+  fs.rmSync(path.join(tmp, 'history-fold', 'index'), { recursive: true, force: true })
 }
 
 // A config that folds reliably: 20 steps = 21000 tokens, keep 9 nodes = 3 steps = 3150.
@@ -386,6 +387,110 @@ await test('two folds in one session: the second one folds the previous marker',
   assert.equal(lastMark().mark, 'folded')
   const second = appended[1].opts
   assert.ok(second.sourceEventSeqs.includes(markerSeq), 'the second fold must shadow the first marker')
+})
+
+// ---------------------------------------------------------------- tiered index (2026-10-15)
+
+// The in-context index is SAMPLED once it overflows digestMaxChars, and the sampling step is
+// capped -- so without a tier file the oldest spans decay into "somewhere in seqs A..B".
+// The tier file is the unsampled index, on disk, named by the in-context message.
+function tierPath(start, end) {
+  return path.join(tmp, 'history-fold', 'index', 'session-test-0001', 'f' + start + '-' + end + '.md')
+}
+
+// Put a folded message back into the surface the way dsh-session does after a fold.
+function spliceMarker(session, meter, opts, text, markerSeq) {
+  const si = session.surface.nodes.indexOf(opts.start)
+  const ei = session.surface.nodes.indexOf(opts.end)
+  meter.setTokens(markerSeq, 20000)
+  session.events.push({
+    seq: markerSeq,
+    type: 'user/message',
+    data: { id: 'marker', role: 'user', content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'dsh-history-fold' } },
+  })
+  session.surface.nodes.splice(si, ei - si + 1, markerSeq)
+}
+
+await test('tier index: a fold writes the unsampled index to disk and names it in context', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 6, targetSurfaceTokens: 3000, minFoldNodes: 1 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'must fold')
+  const { start, end } = appended[0].opts.surfaceOp
+  const tier = tierPath(start, end)
+  assert.ok(fs.existsSync(tier), 'the tier file must exist: ' + tier)
+  const body = fs.readFileSync(tier, 'utf8')
+  assert.ok(body.includes('## message index'), 'the tier file must carry the full index')
+  assert.ok(body.includes('seqs ' + start + '..' + end), 'the tier file must name its range')
+  assert.ok(body.includes(archivePath()), 'the tier file must point back at the raw text')
+
+  const text = appended[0].data.content[0].text
+  assert.ok(text.includes(tier), 'the folded message must name the tier file')
+  const m = /\[fold-index\] seqs=(\d+)\.\.(\d+) messages=(\d+) file=(.+)/.exec(text)
+  assert.ok(m, 'the folded message must carry a parseable marker')
+  assert.equal(Number(m[1]), start)
+  assert.equal(Number(m[2]), end)
+  assert.equal(m[4].trim(), tier)
+})
+
+await test('tier index: the next fold turns an older marker into a pointer and nests the tiers', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 6, targetSurfaceTokens: 3000, minFoldNodes: 1 })
+  const { session, meter, appended } = buildSession(makeSteps(20))
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1)
+  const first = appended[0].opts.surfaceOp
+  const firstText = appended[0].data.content[0].text
+  const firstTier = tierPath(first.start, first.end)
+
+  spliceMarker(session, meter, first, firstText, 9100)
+  await runHandler(session, meter)
+  assert.equal(appended.length, 2, 'a second fold must be possible')
+
+  const secondText = appended[1].data.content[0].text
+  assert.ok(
+    /\[0\] fold-pointer seq=9100:/.test(secondText),
+    'the old marker must become a pointer line, not a truncated prefix'
+  )
+  assert.ok(secondText.includes(firstTier), 'the pointer line must name the older tier file')
+
+  const second = appended[1].opts.surfaceOp
+  const body = fs.readFileSync(tierPath(second.start, second.end), 'utf8')
+  assert.ok(body.includes('## older tier files'), 'the new tier file must nest the older one')
+  assert.ok(body.includes(firstTier), 'the nesting must name the older tier file')
+})
+
+await test('tier index: fold-pointer lines survive digest sampling', async () => {
+  resetLog()
+  writeConfig({ ...BASE, keepRecentNodes: 6, targetSurfaceTokens: 3000, minFoldNodes: 1, digestMaxChars: 500 })
+  const { session, meter, appended } = buildSession(makeSteps(60))
+  const markerSeq = 9200
+  meter.setTokens(markerSeq, 20000)
+  const oldTier = tierPath(1, 9)
+  session.events.push({
+    seq: markerSeq,
+    type: 'user/message',
+    data: {
+      id: 'marker',
+      role: 'user',
+      content: [{ type: 'text', text: '[dsh-history-fold] an older fold\n[fold-index] seqs=1..9 messages=10 file=' + oldTier }],
+      source: { kind: 'plugin', plugin: 'dsh-history-fold' },
+    },
+  })
+  session.surface.nodes.unshift(markerSeq)
+
+  await runHandler(session, meter)
+  assert.equal(appended.length, 1, 'must fold')
+  const text = appended[0].data.content[0].text
+  assert.ok(text.includes('sampled: every'), 'the digest must really have been sampled')
+  assert.ok(text.includes('fold-pointer seq=9200'), 'a fold-pointer must never be sampled away')
+  assert.ok(text.includes(oldTier), 'the surviving pointer must name the older tier file')
+
+  const { start, end } = appended[0].opts.surfaceOp
+  const body = fs.readFileSync(tierPath(start, end), 'utf8')
+  assert.ok(body.includes('## older tier files'), 'the tier file must nest the older fold')
+  assert.ok(body.includes(oldTier), 'the nesting must name the older tier file')
 })
 
 // ---------------------------------------------------------------- hostile contexts
