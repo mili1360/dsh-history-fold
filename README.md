@@ -4,12 +4,18 @@
 [![deepseek-harness](https://img.shields.io/badge/deepseek--harness-plugin-4b6bfb)](https://github.com/topics/deepseek-harness)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Topics:** `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
+> **Topics:** `dsh` · `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
 > `context-compaction` · `non-summary` · `recoverable` · `extractive-index`
 
-A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that folds the **oldest**
-part of a session's visible history into a single message backed by a **lossless local
-archive**, so a long session stops paying for its entire history on every request.
+**Is a long DSH session costing you more on every single turn — and getting slower while it
+does?**
+
+Every request re-sends the whole visible history, and a context window is billed by the token.
+A conversation a few hundred turns deep pays for all of them, every time, whether or not any of
+it is still relevant.
+
+This plugin folds the **oldest** part of that visible history into a single message backed by a
+**lossless local archive** — the request gets smaller, and nothing is thrown away.
 
 - **Inert by default.** A fresh install reads nothing, writes nothing and logs nothing
   until you configure it.
@@ -17,6 +23,9 @@ archive**, so a long session stops paying for its entire history on every reques
   committed, and the replacement tells the model exactly where to look.
 - **No `node_modules` patching.** It uses the same public surface-replacement mechanism as
   the shipped compactor, so a DSH upgrade cannot break it.
+- **Also works on DSH 0.2.0** (`0.2.0-rc.2`), which changed four things this plugin depends on
+  — two of which fail silently. See
+  [DSH 0.2.0](#dsh-020-0200-rc2--supported) for what changed and how each was measured.
 
 ---
 
@@ -459,3 +468,11 @@ expensive and slow the longer it runs:
 MIT — see [LICENSE](LICENSE).
 
 中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+
+---
+
+**If this made a session usable again, a ★ is what lets the next person find it.** Discovery
+here is ranked by stars — the plugin directories and GitHub's own search both sort by them — so
+a reader who was helped is the only thing that moves that number. Bug reports and "this did not
+work on my build" are just as valuable: they are the only reason the compatibility section above
+is worth anything.
