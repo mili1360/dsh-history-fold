@@ -141,6 +141,26 @@ in context it answered "not in context" instead of guessing.
 
 ## Install
 
+One command, straight from the repository:
+
+```bash
+dsh plugin add --profile web github:mili1360/dsh-history-fold
+```
+
+That resolves the package over git, adds it to the profile's `dependencies`, and registers
+the bundle in `dsh.profile.bundles` on its own — verified on `0.2.0-rc.2`. Then **restart
+DSH**: a registered bundle is only picked up at boot.
+
+Works the same way from a local clone, if you would rather build from source:
+
+```bash
+git clone https://github.com/mili1360/dsh-history-fold.git
+dsh plugin add --profile web ./dsh-history-fold
+```
+
+<details>
+<summary>Doing it by hand instead</summary>
+
 This is a plugin for a DSH profile. Add it to the profile — the same layer every other DSH
 plugin uses.
 
@@ -178,6 +198,8 @@ plugin uses.
 
 To remove it, delete the row you added and restart. Nothing else is left behind; the archive
 directory is the only thing this plugin creates.
+
+</details>
 
 ## Requirements / compatibility
 
