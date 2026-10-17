@@ -388,6 +388,51 @@ await test('a corrupt config.json is announced in the log instead of being swapp
   assert.ok(marks.includes('config-ignored'), 'the fallback to DEFAULTS must be visible in the log')
 })
 
+await test('a fold that the recent-window blocks is retried at the emergency line', async () => {
+  resetLog()
+  // 10 steps x 1050 = 10,500 tokens over 30 nodes. keepRecentNodes 28 leaves one foldable node
+  // pair, which cannot reach the target, so the normal attempt ends in no-safe-cut.
+  writeConfig({
+    ...BASE,
+    triggerSurfaceTokens: 9000,
+    targetSurfaceTokens: 6000,
+    keepRecentNodes: 28,
+    emergencyTriggerSurfaceTokens: 10000,
+    emergencyKeepRecentNodes: 12,
+    minFoldNodes: 20,
+    minFoldTokens: 20000,
+    emergencyMinFoldNodes: 4,
+    emergencyMinFoldTokens: 2000,
+  })
+  const { session, meter, appended } = makeSession(10)
+  await runHandler(session, meter)
+  assert.ok(appended.length > 0, 'the emergency retry must produce a fold')
+  const last = lastMark()
+  assert.equal(last.mark, 'folded', 'the retry must actually fold, not just log intent')
+  assert.equal(last.emergency, true, 'the fold must be marked as the emergency path')
+  assert.ok(last.surfaceTokens >= 10000, 'the emergency line must be what triggered it')
+})
+
+await test('the same session is left alone when the emergency line is not reached', async () => {
+  resetLog()
+  // Control for the test above: identical session and recent window, but the second chance sits
+  // above the surface, so nothing happens. Without this, the retry could be what always fires.
+  writeConfig({
+    ...BASE,
+    triggerSurfaceTokens: 9000,
+    targetSurfaceTokens: 1000,
+    keepRecentNodes: 28,
+    emergencyTriggerSurfaceTokens: 50000,
+    emergencyKeepRecentNodes: 12,
+    minFoldNodes: 20,
+    minFoldTokens: 20000,
+  })
+  const { session, meter, appended } = makeSession(10)
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0, 'below the emergency line the plugin must not fold')
+  assert.equal(lastMark().mark, 'no-safe-cut')
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)

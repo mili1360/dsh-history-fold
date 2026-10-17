@@ -31,6 +31,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     A config that omits these keys inherits the new defaults; a config that sets them
     explicitly is unaffected, so no existing installation changes behaviour on upgrade.
 
+### Added
+
+- **A second chance at 0.8 of the window: `emergencyTriggerRatio`.**
+
+  A bounded fold above the trigger cannot normally fail to land: it takes the oldest run all
+  the way to `lastFoldableIdx` in one step. Three narrow things can still leave the surface
+  climbing — `keepRecentNodes` covering the entire foldable span, `minFold*` refusing a small
+  fold, or an archive write aborting the fold by design. Where automatic compaction is turned
+  off (a preset with `compaction-basic` at `auto: false`), that gap has no backstop at all.
+
+  So when the next turn still finds the surface at or above `emergencyTriggerRatio` (0.8, i.e.
+  800k of a 1M window), the fold is retried with `emergencyKeepRecentNodes` (12 instead of 60)
+  and the floors lowered to `emergencyMinFoldNodes` / `emergencyMinFoldTokens` (4 / 2000). The
+  mechanism is unchanged — verbatim archive first, no split of a tool-call/tool-result pair,
+  still only at a turn's first step — it just holds less recent history back. Every line from
+  that path carries `emergency: true`, and the resolved line is clamped to `max(emergency,
+  trigger)` so the second chance can never fire alongside the first.
+
+  Pinned by two tests: one where the recent window blocks the normal attempt and the retry
+  folds, and its control where the same session sits below the emergency line and must be left
+  alone.
+
 ## [0.2.2] - 2026-10-15
 
 ### Fixed

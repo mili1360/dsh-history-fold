@@ -58,7 +58,6 @@ contextWindow`, or an explicit absolute `triggerSurfaceTokens`, see
    abandoned — history is never dropped without a copy on disk first.
 3. Replaces that range with **one** `user/message`, using the same mechanism as the shipped
    compactor:
-
    ```js
    session.append('user/message', message, {
      surfaceOp: { op: 'replace', start, end },
@@ -68,6 +67,17 @@ contextWindow`, or an explicit absolute `triggerSurfaceTokens`, see
 
    `dsh-session` then splices the replacement into the old range's position, so chronology
    is preserved and the conversation still reads in order.
+
+**If that fold did not land, there is a second chance.** When the next turn still finds the
+surface at or above `emergencyTriggerRatio` (0.8 of the window, 800k on a 1M window), the
+normal attempt clearly did not bring it down — `keepRecentNodes` covered the whole foldable
+span, the `minFold*` floors refused a small fold, or an archive write failed and the fold was
+abandoned. The plugin then retries with the recent window cut back to
+`emergencyKeepRecentNodes` (12) and the floors lowered to `emergencyMinFoldNodes` /
+`emergencyMinFoldTokens`. It is the same bounded fold: the same archival of every node, the
+same refusal to split a tool-call/tool-result pair. It just stops being polite about how much
+history it holds back — and every line of that fold carries `emergency: true` in the log, so a
+reader can tell the two paths apart afterwards.
 
 ## The replacement is an index, not a summary
 
@@ -272,6 +282,11 @@ every turn**, so edits apply without a restart.
 | `targetSurfaceTokens` | `180000` | Absolute target, as a fallback. Explicit here ⇒ wins. Must be reachable — see below. |
 | `triggerRatio` | `0.75` | Fold only above this fraction of the model's context window. Scales with the window; used whenever the window resolves and no absolute key is set. |
 | `targetRatio` | `0.18` | Fold down to about this fraction of the window. |
+| `emergencyTriggerRatio` | `0.8` | Second chance. Still at or above this fraction of the window at the next turn ⇒ the normal attempt did not land, so retry with the relaxed limits below. |
+| `emergencyTriggerSurfaceTokens` | `800000` | Absolute form of the second chance, used when the window cannot be resolved. Never allowed below the normal trigger. |
+| `emergencyKeepRecentNodes` | `12` | How much recent history the retry is still allowed to protect (the smaller of this and `keepRecentNodes` wins). |
+| `emergencyMinFoldNodes` | `4` | Retry floor on node count. |
+| `emergencyMinFoldTokens` | `2000` | Retry floor on folded tokens. |
 | `keepRecentNodes` | `60` | Never fold the most recent this-many nodes. |
 | `minFoldNodes` | `20` | Refuse to fold fewer nodes than this. |
 | `minFoldTokens` | `20000` | Refuse to fold fewer tokens than this. |

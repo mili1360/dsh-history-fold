@@ -128,12 +128,37 @@ The one-line index below is extractive, not a rewritten summary ...
 | **切点必须配对平衡** | 有未闭合的工具调用时绝不切 ✓ |
 | **只在一轮开头折** | 步骤中间绝不折 ✓ |
 | **出错一律放行** | 任何异常都 `next()` ✓ 绝不断你正常对话 ✓ |
-| **默认 inert** | 没有 `config.json` ⇒ `enabled:false` + `dryRun:true` ⇒ 什么都不做 ✓ |
+| **默认就是开着** | 没有 `config.json` ⇒ `enabled:true` + `dryRun:false` ⇒ 越过触发线就真折 ✓ 想只看不动写 `{"dryRun":true}` ✓ |
+| **第二道闸** | 上一轮没折成、这轮还停在 `emergencyTriggerRatio`（0.8）之上 ⇒ 放宽参数再折一次 ✓ 日志里带 `emergency: true` ✓ |
 
-> ⚠️ 2026-10-11 修正：**在这之前，代码默认是 `enabled:true` + `dryRun:false`** ✗
-> 与本文件和 `cordis.patch.yml` 里写的「安全默认」**完全相反** ✗
-> 也就是说：一个新人 clone 下来装上，**它会立刻在 25 万 token 就开始动他的会话历史** ✓
-> 已按文档承诺改成 inert，并加了测试守着这条承诺 ✓
+> ⚠️ 2026-10-17 改：**默认值从「装上什么都不做」改成「装完就干活」** ✓
+> 原来是 `enabled:false` + `dryRun:true`，README 里还管那叫“安全默认” ——
+> 那不是安全，是缺席 ✗ 一个专门用来压体积的插件，装完却一趟都不干，等于没装 ✓
+> 现在的兜底是写到位而不是关掉：折前逐字归档、归档失败就放弃、`{"enabled":false}` 随时叫停 ✓
+
+## 折不动怎么办：第二道闸（2026-10-17 加）
+
+正常情况折不动是不成立的 —— 触发线一过，就把能折的一段**一次折到底**（折到 `lastFoldableIdx`，
+目标 180k），所以在同一轮里它不可能“折一点然后放弃”。
+
+真正会让它空转的只有三个很窄的口子：
+
+1. 最近还保的 `keepRecentNodes` 个节点，**它们自己就超过触发线**；
+2. 存档写失败（按设计直接放弃，宁可不折也不丢）；
+3. 找不到配对平衡的切点（整个可折区的工具调用/结果都配不成对）。
+
+为了不让这三个口子把 surface 一路顶到窗口上限，加了第二道闸：
+
+- 下一轮如果还停在窗口的 **0.8**（`emergencyTriggerRatio`，1M 窗口 = 80 万）之上 ⇒
+  说明上一次没折成 ⇒ **放宽参数再折一次**：
+  - 最近节点从 `keepRecentNodes`（60）降到 `emergencyKeepRecentNodes`（12）
+  - 折叠下限从 `minFoldNodes/minFoldTokens`（20 / 20000）降到 `emergencyMinFoldNodes/MinFoldTokens`（4 / 2000）
+- 机制完全不变：**照样逐字归档**、**照样不切工具对**、照样只在一轮开头折 ✓
+- 只是“客气程度”降低：允许少留一点最近历史 ✓
+- 日志里这次折叠带 `emergency: true`，事后能分清是哪条路 ✓
+
+> 第二道闸永远不会低于第一道：`emergency` 取 `max(绝对值, 触发线)`，
+> 否则它会在同一轮里和正常折叠重复触发 ✓
 
 ## 配置
 
@@ -175,6 +200,11 @@ The one-line index below is extractive, not a rewritten summary ...
 | `targetSurfaceTokens` | `180000` | 绝对目标，**兜底用** ✓ 同上 ✓ **必须够得着**（见下） |
 | `triggerRatio` | `0.75` | 可见历史超过**上下文窗口的这个比例**才折 ✓ 窗口能解析出来、且没写绝对值时用它 |
 | `targetRatio` | `0.18` | 折到大约窗口的这个比例就停 |
+| `emergencyTriggerRatio` | `0.8` | 第二道闸。下一轮还停在这个比例之上 ⇒ 上一次没折成，用下面的放宽参数再折一次 |
+| `emergencyTriggerSurfaceTokens` | `800000` | 第二道闸的绝对值形式（窗口解析不出来时用）✓ 永远不会低于正常触发线 |
+| `emergencyKeepRecentNodes` | `12` | 急折时还允许保住多少最近节点（与 `keepRecentNodes` 取小） |
+| `emergencyMinFoldNodes` | `4` | 急折的节点数下限 |
+| `emergencyMinFoldTokens` | `2000` | 急折的 token 下限 |
 | `keepRecentNodes` | `60` | 最近的这么多节点永不折 |
 | `minFoldNodes` | `20` | 一次折得太少就不值当 |
 | `minFoldTokens` | `20000` | 同上，按 token 算 |
