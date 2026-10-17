@@ -141,8 +141,8 @@ The one-line index below is extractive, not a rewritten summary ...
 
 ```json
 {
-  "enabled": false,
-  "dryRun": true,
+  "enabled": true,
+  "dryRun": false,
   "profile": true,
   "triggerSurfaceTokens": 250000,
   "targetSurfaceTokens": 180000,
@@ -162,13 +162,14 @@ The one-line index below is extractive, not a rewritten summary ...
 }
 ```
 
-要真开：把 `enabled` 改 `true`、`dryRun` 改 `false` ✓ 建议**先用 `dryRun: true` 跑一段**
-看日志里的数字再决定 ✓
+装完就是开着的：默认会真折 ✓ 但只在窗口占用过 `triggerRatio`（0.75）时才动手 ✓
+那是内置压缩（0.8）下面的那条线 ✓ 而且每个被折的节点都先逐字存档再离开可见历史 ✓
+想先只看不写，就建配置写 `{ "dryRun": true }`，看日志里的数字满意了再改回 `false` ✓
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `enabled` | `false` | 总开关 ✓ `false` = 加载了但完全空转 |
-| `dryRun` | `true` | `true` = 只看只记，绝不写 |
+| `enabled` | `true` | 总开关 ✓ `false` = 加载了但完全空转 |
+| `dryRun` | `false` | `true` = 只看只记，绝不写 |
 | `profile` | `true` | 每轮写一份体积剖析 |
 | `triggerSurfaceTokens` | `250000` | 绝对触发线，**兜底用**（见下面的解析顺序）✓ 写在 `config.json` 里就优先于 `triggerRatio` |
 | `targetSurfaceTokens` | `180000` | 绝对目标，**兜底用** ✓ 同上 ✓ **必须够得着**（见下） |

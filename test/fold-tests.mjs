@@ -137,17 +137,18 @@ await test('disabled: never appends, never archives, never logs', async () => {
   assert.ok(!fs.existsSync(path.join(tmp, 'history-fold')), 'nothing may be created')
 })
 
-await test('no config.json at all: inert, exactly as the SAFETY block promises', async () => {
-  // The header promises a fresh install "changes nothing at all". That is a contract, so it
-  // gets a test: DEFAULTS themselves must be inert, with no config file present.
+await test('no config.json at all: the shipped defaults take over, and they are not inert', async () => {
+  // The header promises a fresh install is NOT a no-op: DEFAULTS enable the plugin and fold
+  // for real. At 21k surface tokens the 0.75-ratio / absolute trigger is still far away, so
+  // the observable effect of a fresh install is the profile line, not a fold.
   fs.rmSync(path.join(tmp, 'dsh-history-fold', 'config.json'), { force: true })
   fs.rmSync(path.join(tmp, 'logs'), { recursive: true, force: true })
   fs.rmSync(path.join(tmp, 'history-fold'), { recursive: true, force: true })
   const { session, meter, appended } = makeSession(20)
   await runHandler(session, meter)
-  assert.equal(appended.length, 0, 'a fresh install must not fold anything')
-  assert.ok(!fs.existsSync(path.join(tmp, 'history-fold')), 'a fresh install must not archive')
-  assert.ok(!fs.existsSync(path.join(tmp, 'logs', 'history-fold.jsonl')), 'a fresh install must not even log')
+  assert.equal(appended.length, 0, 'a fresh install must not fold while below the trigger')
+  assert.ok(!fs.existsSync(path.join(tmp, 'history-fold')), 'a fresh install must not archive below the trigger')
+  assert.ok(fs.existsSync(path.join(tmp, 'logs', 'history-fold.jsonl')), 'a fresh install must profile from the first turn')
 })
 
 await test('below the trigger: idle, nothing written', async () => {

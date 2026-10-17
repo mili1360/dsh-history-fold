@@ -336,7 +336,7 @@ await test('wrong-typed config values do not crash the hook', async () => {
   assert.equal(nexted, true, 'must always call next()')
 })
 
-await test('corrupt config.json: falls back to the inert defaults', async () => {
+await test('corrupt config.json: falls back to the shipped defaults, which are not inert', async () => {
   resetLog()
   fs.writeFileSync(path.join(tmp, 'dsh-history-fold', 'config.json'), '{ this is not json')
   const { session, meter, appended } = buildSession(makeSteps(20))

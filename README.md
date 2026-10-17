@@ -185,16 +185,22 @@ plugin uses.
 
 2. **Restart DSH.** Plugin rows load at boot.
 
-3. Nothing will happen yet — the defaults are inert. Turn it on by writing
+3. **It is already on.** The shipped defaults fold for real — but only above `triggerRatio`
+   (0.75 of the model's context window), which sits just below the built-in compactor's 0.8, and
+   every folded node is archived verbatim before it leaves the visible history. Installing it
+   therefore does not leave the request untouched: it profiles from the first turn and folds once
+   a window is 75% full.
+
+   To watch it without letting it write anything, create
    `~/.dsh/dsh-history-fold/config.json`:
 
    ```json
-   { "enabled": true, "dryRun": true }
+   { "dryRun": true }
    ```
 
    `dryRun: true` logs what it *would* fold without writing anything. Watch
    `~/.dsh/logs/history-fold.jsonl` until the numbers look right, then set
-   `"dryRun": false`.
+   `"dryRun": false` again (or delete the file and the default takes over).
 
 To remove it, delete the row you added and restart. Nothing else is left behind; the archive
 directory is the only thing this plugin creates.
@@ -259,8 +265,8 @@ every turn**, so edits apply without a restart.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | Master switch. `false` ⇒ loaded but completely idle. |
-| `dryRun` | `true` | `true` ⇒ observe and log only, never write. |
+| `enabled` | `true` | Master switch. `false` ⇒ loaded but completely idle. |
+| `dryRun` | `false` | `true` ⇒ observe and log only, never write. |
 | `profile` | `true` | Write one size/profile line per turn. |
 | `triggerSurfaceTokens` | `250000` | Absolute trigger, as a fallback — see the resolution order below. Explicit here ⇒ wins. |
 | `targetSurfaceTokens` | `180000` | Absolute target, as a fallback. Explicit here ⇒ wins. Must be reachable — see below. |

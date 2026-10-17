@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The shipped defaults are no longer inert: `enabled: true`, `dryRun: false`.**
+
+  The old defaults (`enabled: false`, `dryRun: true`) meant that installing this plugin changed
+  nothing at all — the very thing it exists to do, keeping the request small, could only begin
+  after a reader found the config file, wrote two keys and restarted. A plugin whose whole
+  purpose is to fold should not install itself into a no-op. Reporting it as "safe by default"
+  hid that: there is no such thing as safety in a plugin that never acts.
+
+  What actually bounds the fold was always elsewhere, and it still does: the fold can only fire
+  above `triggerRatio` (0.75 of the model's context window, just below the built-in compactor's
+  0.8), every folded node is archived verbatim **before** the fold, and a failed archive write
+  aborts the fold instead of losing history. So the default now means "act only in the last
+  quarter of a window, and never lose a byte" rather than "never act".
+
+  Two consequences worth stating plainly:
+
+  - **A fresh install profiles from the first turn and writes to
+    `~/.dsh/logs/history-fold.jsonl`.** Nothing else is created until a window is 75% full.
+  - `dryRun: true` is still supported and now means what it says — observe without writing.
+    A config that omits these keys inherits the new defaults; a config that sets them
+    explicitly is unaffected, so no existing installation changes behaviour on upgrade.
+
 ## [0.2.2] - 2026-10-15
 
 ### Fixed
