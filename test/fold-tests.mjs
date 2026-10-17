@@ -98,6 +98,10 @@ function logLines() {
   return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
 }
 
+function resetLog() {
+  fs.rmSync(path.join(tmp, 'logs', 'history-fold.jsonl'), { force: true })
+}
+
 function lastMark() {
   const lines = logLines()
   return lines[lines.length - 1]
@@ -357,6 +361,31 @@ await test('the archive keeps the real tool-result body, not just the call id', 
   assert.ok(toolRows.every((r) => r.text.includes(body)), 'every archived tool result must carry its body verbatim')
   // the fixture names its calls c0, c1, ... -- keep the id so a body can be traced to its call
   assert.ok(toolRows.every((r) => /\[tool-result c\d+\]/.test(r.text)), 'the call id must stay for correlation')
+})
+
+await test('a BOM before the JSON does not silently disable the config', async () => {
+  resetLog()
+  // PowerShell 5.1's `Set-Content -Encoding utf8` writes a BOM. JSON.parse throws on it, and
+  // falling back to DEFAULTS was invisible while those defaults were inert -- now that
+  // enabled defaults to true, {"enabled": false} behind a BOM would fold anyway.
+  fs.writeFileSync(
+    path.join(tmp, 'dsh-history-fold', 'config.json'),
+    '\uFEFF' + JSON.stringify({ ...BASE, enabled: false }),
+    'utf8',
+  )
+  const { session, meter, appended } = makeSession(20)
+  await runHandler(session, meter)
+  assert.equal(appended.length, 0, 'enabled:false must be honoured even behind a BOM')
+  assert.equal(logLines().length, 0, 'a disabled plugin must stay quiet')
+})
+
+await test('a corrupt config.json is announced in the log instead of being swapped for defaults', async () => {
+  resetLog()
+  fs.writeFileSync(path.join(tmp, 'dsh-history-fold', 'config.json'), '{ this is not json')
+  const { session, meter } = makeSession(20)
+  await runHandler(session, meter)
+  const marks = logLines().map((l) => l.mark)
+  assert.ok(marks.includes('config-ignored'), 'the fallback to DEFAULTS must be visible in the log')
 })
 
 fs.rmSync(tmp, { recursive: true, force: true })
