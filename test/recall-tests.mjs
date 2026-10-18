@@ -79,6 +79,13 @@ await test('keywords: a one-character-only message yields nothing', () => {
     assert.equal(extractKeywords('a 我 的', { minKeywordChars: 2, maxKeywords: 10 }).length, 0)
 })
 
+await test('keywords: a spam repetition yields nothing at all', () => {
+  // The 为什么为什么为什么… message used to return the spam itself. Repeated runs have no
+  // retrieval signal, and their 2-char grams are noise.
+  assert.deepEqual(extractKeywords('为什么为什么为什么为什么'), [])
+  assert.equal(plugin.isRepetitiveRun('为什么为什么为什么'), true)
+  assert.equal(plugin.isRepetitiveRun('正常的一句话'), false)
+})
 await test('keywords: meme captions are not search terms', () => {
     // Measured live 2026-10-18: this exact shape produced 表情/室内/内实/实景/景背/背景.
     const k = extractKeywords('可以，哈哈 [表情: 托腮思考，头顶加载圈，脑子转不动]', { minKeywordChars: 2, maxKeywords: 10 })
