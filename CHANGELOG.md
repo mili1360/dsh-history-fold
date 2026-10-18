@@ -5,6 +5,51 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-18
+
+The plugin now has two modules. `lib/fold.js` is the fold, unchanged in behaviour; `lib/recall.js`
+is new and does the thing the fold's index has always promised but never delivered: it actually
+goes and looks.
+
+### Added
+
+- **A second module: automatic recall (`lib/recall.js`).**
+
+  The fold replaces old history with an index that says "the full text is archived at …". Whether
+  anyone ever follows that pointer was left to the model's judgement — and measurement settled
+  it: this plugin had been loaded for ten days with `folding` at 0 and nobody ever opened its
+  log. A mechanism that depends on remembering to use it is not a mechanism.
+
+  So on each turn's first step, recall takes the user's message, extracts keywords (latin words
+  plus overlapping 2-character CJK grams, with a stopword list), greps the session's own archive
+  and optionally a directory of markdown notes, and injects at most `maxChars` of excerpts — each
+  one tagged with the path of its source. Nothing is injected on chit-chat, and every skip that
+  is not obvious writes a `recall-skip` line explaining itself.
+
+  It prefers `agent.inject()` over `agent.steer()`: both deliver at the next step
+  (`dsh-agent-loop`: `steer` wakes the driver, `inject` does not), and we are already inside a
+  running turn, so there is nothing to wake.
+
+- **Meme captions are never search terms.** Live measurement: a one-word reply carrying
+  `[表情: 室内实景背景，女仆装半身…]` produced the keywords 表情/室内/内实/实景/景背/背景 and
+  pulled back three archived meme captions. Archive rows are now scored against the text with
+  captions stripped, so a node that only carries one cannot count as a hit.
+
+### Changed
+
+- **One plugin, two files, with separate failure domains.** `lib/index.js` applies both modules
+  with independent `try/catch` blocks and logs `module-failed` when either throws: the fold
+  failing is the worst case (lost history), recall failing is a missed hint, and one must never
+  cause the other. Each module has its own `enabled`.
+- `recall` configuration lives under a `recall` key in the same `config.json`; the fold's keys are
+  untouched, so existing installations keep working without edits.
+
+### Fixed
+
+- `lastUserText` reads `data`, `data.message` and `data.payload`, and accepts `text`, `content`
+  as a string, or a content array. The first live run produced no recall lines at all because a
+  shape it did not recognise returned `""` and the handler skipped in silence.
+
 ## [Unreleased]
 
 ### Changed
