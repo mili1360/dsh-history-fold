@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-18
+
+Recall stopped being a keyword grep and became an actual retrieval layer.
+
+### Added
+
+- **Semantic retrieval through a local embedding service** (`lib/semantic.js`).
+  Config `recall.semantic.endpoint` (default `http://127.0.0.1:8021/v1/embeddings`) and `model`.
+  Vectors are cached next to each archive as `<archive>.<model>.vec.json`, keyed per row, so a fold
+  only embeds the new rows. A large backlog is embedded in the background: the hook uses whatever
+  is already cached and never waits. Any failure falls back to the gram matcher, so a stopped
+  embedding service changes nothing but quality.
+
+  The rule is *relative*, not a fixed cutoff: bge-small scores Chinese chat in a narrow 0.45-0.60
+  band, so the best row must clear `minScore` **and** beat the median by `minMargin`.
+
+- **`recall_memory(query, limit)` -- an explicit door.** The hook decides what to inject on its
+  own; this lets the model ask. Registered when the build exposes `ctx.tools` (hence the new
+  `export const inject = ['tools']`). A missing archive answers `hits: 0` instead of throwing.
+  It uses looser thresholds than the hook (0.35, no margin), because the caller asked and can
+  judge the results.
+
+- **Two queries per search**: the raw sentence and the keyword join, merged by best score.
+  Measured on the real archive, each won different questions.
+
+### Changed
+
+- The keyword gate only skips genuinely short messages (<12 chars after stripping meme captions).
+  Embeddings take the whole sentence, so a sentence with few extractable keywords is still
+  searchable; the gram matcher still requires `minKeywords`, because it has nothing else.
+- The injected block now tells the model that `recall_memory` exists, so an injection is a door
+  rather than a dead end.
+
+### Fixed
+
+- A skipped recall logs why (`recall-skip` with the shape of the visible tail), instead of looking
+  identical to a broken plugin.
+- Question words and repeated-character spam are not search terms; any 2-gram that appears inside
+  a stopword is dropped too (`为什么` no longer becomes `为什` / `么是`).
+- Meme captions (`[表情: ...]`) never become search terms, and an archive row that only carries
+  one cannot count as a hit.
+- The vector cache is keyed by model name: mixing bge-small (512-dim) and bge-base (768-dim)
+  vectors ranked everything at 0.08.
+
 ## [0.3.0] - 2026-10-18
 
 The plugin now has two modules. `lib/fold.js` is the fold, unchanged in behaviour; `lib/recall.js`
