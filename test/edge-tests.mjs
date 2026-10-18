@@ -112,7 +112,11 @@ async function runHandler(session, meter, step = 1) {
 function logLines() {
   const file = path.join(tmp, 'logs', 'history-fold.jsonl')
   if (!fs.existsSync(file)) return []
-  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  // The recall module shares this log file; its lines are not fold events, so filter them out
+  // here rather than teaching every assertion about the second module.
+  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((l) => !String(l.mark || '').startsWith('recall-'))
 }
 function lastMark() {
   const lines = logLines()

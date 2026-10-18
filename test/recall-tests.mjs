@@ -58,13 +58,13 @@ function run(session, cfg, step = 1) {
     }
     plugin.apply(ctx)
     assert.ok(handlers.length >= 1, 'apply must register the fold listener at least')
-    const steered = []
-    const agent = { session, steer: (m) => steered.push(m) }
+    const sent = []
+    const agent = { session, inject: (m) => sent.push(['inject', m]), steer: (m) => sent.push(['steer', m]) }
     const payload = { agent, step, turn: 3 }
     const next = async () => {}
     return handlers
         .reduce((p, h) => p.then(() => h(payload, next)), Promise.resolve())
-        .then(() => steered)
+        .then(() => sent)
 }
 
 // ---------------------------------------------------------------- keywords
@@ -135,47 +135,48 @@ function seedArchive(sid, text) {
 
 await test('hook: injects one steer when the session archive has a hit', async () => {
     seedArchive('session-r1', '当时把 history-fold 的触发线定在 750k')
-    const steered = await run(makeSession('session-r1', ['history-fold 的触发线是多少']), {
+    const sent = await run(makeSession('session-r1', ['history-fold 的触发线是多少']), {
         enabled: true, recall: { enabled: true, dryRun: false, minIntervalMs: 0 },
     })
-    assert.equal(steered.length, 1, 'exactly one injection')
-    const text = steered[0].content[0].text
+    assert.equal(sent.length, 1, 'exactly one injection')
+    assert.equal(sent[0][0], 'inject', 'inject() is preferred over steer()')
+    const text = sent[0][1].content[0].text
     assert.ok(text.includes('750k'))
     assert.ok(text.includes('路径:'), 'the snippet carries its source path')
-    assert.equal(steered[0].source.kind, 'plugin', 'must not pretend to be the user')
+    assert.equal(sent[0][1].source.kind, 'plugin', 'must not pretend to be the user')
 })
 
 await test('hook: chit-chat with too few keywords injects nothing', async () => {
-    const steered = await run(makeSession('session-r2', ['喵喵喵']), {
+    const sent = await run(makeSession('session-r2', ['喵喵喵']), {
         enabled: true, recall: { enabled: true, minIntervalMs: 0 },
     })
-    assert.equal(steered.length, 0)
+    assert.equal(sent.length, 0)
 })
 
 await test('hook: recall disabled leaves the fold module alone and injects nothing', async () => {
     seedArchive('session-r1', 'history-fold 触发线 750k')
-    const steered = await run(makeSession('session-r1', ['history-fold 触发线']), {
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
         enabled: true, recall: { enabled: false },
     })
-    assert.equal(steered.length, 0)
+    assert.equal(sent.length, 0)
 })
 
 await test('hook: dryRun logs the intent and steers nothing', async () => {
     seedArchive('session-r1', 'history-fold 触发线 750k')
-    const steered = await run(makeSession('session-r1', ['history-fold 触发线']), {
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
         enabled: true, recall: { enabled: true, dryRun: true, minIntervalMs: 0 },
     })
-    assert.equal(steered.length, 0)
+    assert.equal(sent.length, 0)
     const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
     assert.ok(log.includes('recall-would-inject'))
 })
 
 await test('hook: a step other than the first is ignored', async () => {
     seedArchive('session-r1', 'history-fold 触发线 750k')
-    const steered = await run(makeSession('session-r1', ['history-fold 触发线']), {
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
         enabled: true, recall: { enabled: true, minIntervalMs: 0 },
     }, 2)
-    assert.equal(steered.length, 0)
+    assert.equal(sent.length, 0)
 })
 
 await test('hook: a hostile agent is contained (the turn still proceeds)', async () => {
