@@ -72,15 +72,17 @@ function makeSession(steps, tokens) {
 }
 
 function runHandler(session, meter, step = 1) {
-  let handler
+  const handlers = []
   const ctx = {
     get tokenMeter() { return meter },
-    on(event, fn) { assert.equal(event, 'agent/pre-step'); handler = fn },
+    on(event, fn) { assert.equal(event, 'agent/pre-step'); handlers.push(fn) },
     effect() {},
   }
   plugin.apply(ctx)
-  assert.equal(typeof handler, 'function')
-  return Promise.resolve(handler({ agent: { session }, step, turn: 7 }, async () => {}))
+  assert.ok(handlers.length >= 1)
+  const payload = { agent: { session }, step, turn: 7 }
+  const next = async () => {}
+  return handlers.reduce((p, h) => p.then(() => h(payload, next)), Promise.resolve())
 }
 
 function profileLine() {

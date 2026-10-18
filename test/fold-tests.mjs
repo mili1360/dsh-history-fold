@@ -80,16 +80,18 @@ function makeSession(steps) {
 }
 
 function runHandler(session, meter, step = 1) {
-  let handler
+  const handlers = []
   const ctx = {
     get tokenMeter() { return meter },
-    on(event, fn) { assert.equal(event, 'agent/pre-step'); handler = fn },
+    on(event, fn) { assert.equal(event, 'agent/pre-step'); handlers.push(fn) },
     effect() {},
   }
   plugin.apply(ctx)
-  assert.equal(typeof handler, 'function', 'apply must register an agent/pre-step listener')
+  assert.ok(handlers.length >= 1)
   let nexted = false
-  return Promise.resolve(handler({ agent: { session }, step, turn: 12 }, async () => { nexted = true })).then(() => nexted)
+  const payload = { agent: { session }, step, turn: 12 }
+  const next = async () => { nexted = true }
+  return handlers.reduce((p, h) => p.then(() => h(payload, next)), Promise.resolve()).then(() => nexted)
 }
 
 function logLines() {

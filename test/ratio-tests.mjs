@@ -140,15 +140,16 @@ async function runHandler(opts) {
   const { session, llm, kind = 'direct', withMeter = false, meter = null, agentOptions = { provider: 'deepseek', model: 'deepseek-chat' }, signal = undefined } = opts
   const ctx = makeCtx(kind, llm)
   if (withMeter) Object.defineProperty(ctx, 'tokenMeter', { get() { return meter }, configurable: true })
-  let handler = null
+  const handlers = []
   const originalOn = ctx.on.bind(ctx)
-  ctx.on = (event, fn) => { originalOn(event, fn); handler = fn }
+  ctx.on = (event, fn) => { originalOn(event, fn); handlers.push(fn) }
   plugin.apply(ctx)
-  assert.equal(typeof handler, 'function', 'apply must register an agent/pre-step listener')
+  assert.ok(handlers.length >= 1, 'apply must register at least one agent/pre-step listener')
   const agent = { session, options: agentOptions }
   if (opts.agentCtx) agent.ctx = opts.agentCtx
   let nexted = false
-  await handler({ agent, step: 1, turn: 12, ...(signal === undefined ? {} : { signal }) }, async () => { nexted = true })
+  const payload = { agent, step: 1, turn: 12, ...(signal === undefined ? {} : { signal }) }
+  for (const h of handlers) await h(payload, async () => { nexted = true })
   return nexted
 }
 
