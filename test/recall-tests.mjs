@@ -79,6 +79,14 @@ await test('keywords: a one-character-only message yields nothing', () => {
     assert.equal(extractKeywords('a 我 的', { minKeywordChars: 2, maxKeywords: 10 }).length, 0)
 })
 
+await test('keywords: meme captions are not search terms', () => {
+    // Measured live 2026-10-18: this exact shape produced 表情/室内/内实/实景/景背/背景.
+    const k = extractKeywords('可以，哈哈 [表情: 托腮思考，头顶加载圈，脑子转不动]', { minKeywordChars: 2, maxKeywords: 10 })
+    for (const bad of ['表情', '室内', '内实', '实景', '景背', '背景', '托腮', '加载']) {
+        assert.ok(!k.includes(bad), 'meme word leaked into keywords: ' + bad)
+    }
+})
+
 // ---------------------------------------------------------------- snippets
 await test('snippetOf: cuts around the match and marks both ends', () => {
     const s = snippetOf('x'.repeat(300) + 'TARGET' + 'y'.repeat(300), 'TARGET', 50)
@@ -103,6 +111,17 @@ await test('searchArchive: ranks the node that mentions the keyword most', () =>
 
 await test('searchArchive: a missing file is not an error', () => {
     assert.deepEqual(searchArchive(path.join(tmp, 'nope.jsonl'), ['x'], {}), [])
+})
+
+await test('searchArchive: a row that only carries a meme caption is not a hit', () => {
+    const file = path.join(tmp, 'meme-only.jsonl')
+    fs.writeFileSync(file, [
+        { seq: 1, type: 'user/message', text: '好的 [表情: 室内实景背景，女仆装半身]' },
+        { seq: 2, type: 'user/message', text: '室内实景背景 这个词其实是我在说插件' },
+    ].map((r) => JSON.stringify(r)).join('\n'))
+    const hits = searchArchive(file, ['室内'], { maxArchiveHits: 4, snippetChars: 120 })
+    assert.equal(hits.length, 1, 'only the row that mentions it outside a caption')
+    assert.equal(hits[0].source, 'meme-only.jsonl#seq2')
 })
 
 // ---------------------------------------------------------------- notes search
