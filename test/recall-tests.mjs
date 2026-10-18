@@ -215,6 +215,21 @@ await test('hook: a hostile agent is contained (the turn still proceeds)', async
     assert.ok(reached, 'next() still ran')
 })
 
+await test('the recall_memory tool registers and answers without an archive', async () => {
+  // The explicit door: the model asks instead of waiting to be fed. A missing archive is a normal
+  // state, not an error, so the tool must answer instead of throwing.
+  const tools = []
+  plugin.registerRecallTool({ tools: { register: (d) => tools.push(d) } }, {
+    home: () => path.join(tmp, 'empty-home'),
+    readConfig: () => ({ archiveDir: 'history-fold/archive', recall: {} }),
+    log: () => {},
+  })
+  assert.equal(tools.length, 1, 'one tool registered')
+  assert.equal(tools[0].name, 'recall_memory')
+  const r = await tools[0].execute({ query: 'something that is not there' })
+  assert.equal(r.ok, true)
+  assert.equal(r.hits, 0)
+})
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)
