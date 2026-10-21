@@ -5,6 +5,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-22
+
+Recall could only ever reach what had been *folded*. Everything else -- the whole session before the
+first fold, and everything after the last one -- was reachable only by reading the raw log by hand.
+This release makes the plugin mine that log itself.
+
+### Added
+
+- **`lib/notes.js`: the session log becomes memory.** On a timer (`notes.refreshMinutes`, default
+  10) the module reads the newest `sessions/**/session.jsonl.zstd` and writes markdown into
+  `notes.dir` (default `history-fold/notes`), which recall already searches every turn:
+
+  - `day-YYYYMMDD.md` -- every episode of that day: what was asked, the outcome, the paths touched.
+  - `events-YYYY-MM.md` -- one line per durable statement (decision, rule, install, path, root
+    cause), deduped, each with its date and seq so the day file can be opened.
+
+  A pass only runs when the log's mtime/size changed, is deferred out of any hook's critical path,
+  and a failure is logged as `notes-refresh` / `module-failed` rather than taking recall down.
+
+- **Multi-frame zstd decoding in pure Node** (`scanZstdFrames`, `decodeSessionLog`). DSH appends one
+  zstd frame per write batch and `zlib.zstdDecompressSync` stops after the first frame -- measured:
+  the 27.4 MB live log decodes to 183 bytes that way, versus 108 MB / 111k lines / 15,740 frames in
+  1.1 s by walking frame and block headers. No Python sidecar required. A torn final frame (normal
+  for a live log) costs that frame only.
+
+### Fixed
+
+- **Embedding-dimension drift no longer ranks garbage.** The cache is validated against the query
+  vector's length, so vectors from a different model are rebuilt instead of scoring every row at
+  ~0.1 (measured 0.115 before, 0.669 after).
+- The background vector builder wrote its cache to a path missing the model name, so a completed
+  build was never read again. It now goes through the same `cachePathOf` as every other reader and
+  writer.
+
+### Notes
+
+- 13 new tests (`test/notes-tests.mjs`; suite now 118). Sandbox run logged
+  `notes-refresh ok:true ms:165 written:4` inside a real DSH process.
+
 ## [0.4.0] - 2026-10-18
 
 Recall stopped being a keyword grep and became an actual retrieval layer.

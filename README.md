@@ -301,6 +301,31 @@ every turn**, so edits apply without a restart.
 | `logFile` | `logs/history-fold.jsonl` | Relative to `$DSH_HOME`. |
 | `memoryFeed` | `false` | Post the same digest to a memory service after each fold. |
 | `memoryFeedUrl` | — | e.g. `http://127.0.0.1:7999/memory-eternal/api`. |
+| `notes.enabled` | `true` | Mine the session log into `notes.dir` on a timer. Off ⇒ no mining at all. |
+| `notes.dir` | `history-fold/notes` | Where the markdown lands. Relative to `$DSH_HOME` unless absolute. |
+| `notes.refreshMinutes` | `10` | How often the log's mtime/size is checked. A pass runs only when it changed. |
+| `notes.events` | `true` | Also write `events-YYYY-MM.md` (the durable-statement ledger). |
+| `notes.minEventScore` | `3` | Strictness of the ledger. Raise to 4 for fewer, cleaner lines. |
+| `notes.startDelayMs` | `45000` | First pass waits this long so boot is never slowed. |
+| `notes.maxLogMB` | `600` | Safety valve: a bigger log is skipped rather than read into the heap. |
+
+> `notes.*` is read when the plugin loads, so changes to it need a restart; everything else on this
+> table is re-read every turn.
+
+### Mining the session log into notes
+
+Folding only ever covers what has been folded. `lib/notes.js` closes that gap: it decodes the newest
+`$DSH_HOME/sessions/**/session.jsonl.zstd` (concatenated zstd frames, decoded in pure Node) and
+writes two kinds of markdown into `notes.dir`, which recall searches alongside the archive:
+
+- `day-YYYYMMDD.md` — one section per episode: **用户** request, **结论** outcome, **路径** touched.
+- `events-YYYY-MM.md` — one line per durable statement (decision, rule, install, path, root cause),
+  deduped, each carrying its date and seq so the day file can be opened.
+
+Measured on a 27.4 MB log: 15,740 frames → 108 MB / 111k events in ~1.1 s, and a refresh pass
+writes ~50 files in 4-5 s. Secrets (`sk-…`, `Bearer …`, `ghp_…`) are redacted before anything is
+written, so a key that was pasted into the conversation never lands in a note.
+
 
 > **`targetSurfaceTokens` / `targetRatio` must be reachable.** At least `keepRecentNodes` nodes
 > always stay, which is at least that many steps' worth of tokens. A target below that floor can
