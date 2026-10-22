@@ -277,6 +277,9 @@ await test('ownNotesDir prefers the session folder and falls back to the root', 
     fs.writeFileSync(path.join(base, 'sid-1', 'day-1.md'), '我方记忆 alpha', 'utf8')
     fs.writeFileSync(path.join(base, 'root.md'), '共享记忆 alpha', 'utf8')
     assert.equal(plugin.ownNotesDir(base, 'sid-1'), path.join(base, 'sid-1'))
+    // Regression (2026-10-22): the session header says "session-<uuid>" while the miner names the
+    // folder "<uuid>". A raw string compare missed every time and silently disabled isolation.
+    assert.equal(plugin.ownNotesDir(base, 'session-sid-1'), path.join(base, 'sid-1'))
     // A session with no folder yet falls back to the shared root instead of returning nothing.
     assert.equal(plugin.ownNotesDir(base, 'sid-2'), base)
 })

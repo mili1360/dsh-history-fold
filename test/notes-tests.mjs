@@ -1,4 +1,4 @@
-// Tests for the notes module inside dsh-history-fold.
+﻿// Tests for the notes module inside dsh-history-fold.
 //
 // What matters here is not "does it write markdown" but:
 //   - a multi-frame zstd log decodes completely (node's one-shot API only reads frame 1)
@@ -205,6 +205,23 @@ await test('no session log at all is a quiet no-op', () => {
 })
 
 // ---------------------------------------------------------------- summary
+
+await test('a pruned session folder is rebuilt even though the stamp matches', () => {
+    // Regression (2026-10-22): the stamp file made a pass skip a session whose notes folder had
+    // been deleted by hand, so that memory silently never came back.
+    const home = path.join(tmp, 'home4')
+    const dir = path.join(home, 'sessions', 'p', 'session-keep')
+    makeLog(dir, [jsonl([USER(1, '重建测试', T1)])])
+    const first = refreshNotes({ home })
+    assert.equal(first.ok, true)
+    const folder = path.join(home, 'history-fold', 'notes', 'keep')
+    assert.ok(fs.existsSync(folder), 'notes folder missing after first pass')
+    fs.rmSync(folder, { recursive: true, force: true })
+    const second = refreshNotes({ home })
+    assert.equal(second.ok, true)
+    assert.equal(second.mined, 1, 'session was skipped although its notes were gone')
+    assert.ok(fs.existsSync(folder), 'notes folder was not rebuilt')
+})
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\nnotes: ' + passed + ' passed, ' + failed + ' failed')
