@@ -1,9 +1,20 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.6.2] - 2026-10-22
+
+### Fixed
+
+- **Empty sessions were re-decoded on every pass.** A session with no human messages produces no
+  notes, but the skip rule required a note on disk, so those sessions (5 of them live) were decoded
+  again every 10 minutes. The stamp now records how many files the pass wrote (""<stamp>|wrote=N""):
+  N=0 skips without looking at disk, N>0 still requires a note to exist. Empty folders are no
+  longer created at all.
+- 1 new test (empty session skipped on the second pass); suite now **127**.
 
 ## [0.6.1] - 2026-10-22
 

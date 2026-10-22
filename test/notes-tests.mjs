@@ -252,6 +252,21 @@ await test('no session cap by default: every session log is mined', () => {
     assert.equal(capped.mined, 0, 'unchanged logs should be skipped, not re-mined: ' + capped.mined)
 })
 
+await test('an empty session is not re-decoded on every pass', () => {
+    // A session with no human messages produces no notes. Treating that as "needs work" made every
+    // pass re-decode it (measured 2026-10-22: 5 such sessions, ~1 s each, every 10 minutes).
+    const home = path.join(tmp, 'home7')
+    makeLog(path.join(home, 'sessions', 'p', 'session-empty'), [jsonl([ASST(1, '只有模型的独白', T1)])])
+    const first = refreshNotes({ home })
+    assert.equal(first.ok, true)
+    assert.equal(first.mined, 1)
+    assert.equal(first.written, 0)
+    assert.ok(!fs.existsSync(path.join(home, 'history-fold', 'notes', 'empty')), 'empty folder was created')
+    const second = refreshNotes({ home })
+    assert.equal(second.mined, 0, 'empty session was re-decoded')
+    assert.equal(second.skipped, 1)
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\nnotes: ' + passed + ' passed, ' + failed + ' failed')
 if (failed) process.exit(1)
