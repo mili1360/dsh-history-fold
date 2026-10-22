@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-22
+
+Notes were one flat folder fed by whichever session log changed last, so two windows took turns
+owning the same memory.
+
+### Changed
+
+- **Notes are per session**: `<notesDir>/<session id>/day-*.md`. Automatic recall now searches only
+  its own session's folder (`ownNotesDir`) and never pulls another window's memory in. A session
+  with no folder yet falls back to the shared root, so hand-written notes and pre-split layouts
+  keep working.
+- **`refreshNotes` mines every session log**, not only the newest, skipping logs whose
+  mtime+size stamp is unchanged (stamp file `<notesDir>/.stamps.json`). Steady state costs one
+  `stat` per session.
+- The `recall_memory` tool can cross sessions on purpose: `searchNotes(base, kw, { recursive: true })`
+  walks one level of session folders, and results name the folder they came from.
+
+### Notes
+
+- 4 new tests: per-session folder isolation (two sessions must not merge), idempotent re-run across
+  sessions, `ownNotesDir` fallback, recursive tool search. Suite now **123**.
+- Existing flat notes were migrated into `notes/<session id>/` (backup kept).
+
 ## [0.5.1] - 2026-10-22
 
 The notes dir reached 3.6 MB across 52 files, and every turn re-read and re-lowercased all of it.

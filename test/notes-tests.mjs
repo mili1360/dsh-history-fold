@@ -137,28 +137,40 @@ await test('meme markers and CRLF are stripped from the text', () => {
 
 // ---------------------------------------------------------------- io
 
-await test('refreshNotes writes day and event files under the given home', () => {
+await test('refreshNotes writes each session into its own folder', () => {
     const home = path.join(tmp, 'home1')
     const sessDir = path.join(home, 'sessions', 'proj', 'session-abc')
     makeLog(sessDir, [jsonl([USER(1, '第一个问题', T1), ASST(2, '结论：已经装好了，路径是 E:\\tools\\x.exe。', T1)]), jsonl([USER(3, '第二个问题', T2)])])
 
     const r = refreshNotes({ home })
     assert.equal(r.ok, true)
-    const dir = path.join(home, 'history-fold', 'notes')
-    const files = fs.readdirSync(dir)
+    const base = path.join(home, 'history-fold', 'notes')
+    // Per-session isolation: this session's notes must NOT sit in the shared root.
+    assert.ok(fs.statSync(path.join(base, 'abc')).isDirectory(), 'per-session folder missing')
+    const files = fs.readdirSync(path.join(base, 'abc'))
     assert.ok(files.some((f) => f.startsWith('day-20261001')), 'day file for 10-01 missing')
     assert.ok(files.some((f) => f.startsWith('day-20261002')), 'day file for 10-02 missing')
     assert.ok(files.some((f) => f.startsWith('events-2026-10')), 'event file missing')
-    const day2 = fs.readFileSync(path.join(dir, files.find((f) => f.startsWith('day-20261002'))), 'utf8')
+    const day2 = fs.readFileSync(path.join(base, 'abc', files.find((f) => f.startsWith('day-20261002'))), 'utf8')
     assert.ok(day2.includes('第二个问题'))
+
+    // Two sessions stay separate.
+    const otherDir = path.join(home, 'sessions', 'proj', 'session-xyz')
+    makeLog(otherDir, [jsonl([USER(9, '另一个窗口的问题', T2)])])
+    refreshNotes({ home })
+    const abc = fs.readdirSync(path.join(base, 'abc')).join(',')
+    assert.ok(!abc.includes('另一个'), 'session folders merged')
+    assert.ok(fs.readdirSync(path.join(base, 'xyz')).some((f) => f.startsWith('day-')), 'second session not mined')
 })
 
 await test('a second refresh over the same log is idempotent', () => {
     const home = path.join(tmp, 'home1')
-    const before = fs.readFileSync(path.join(home, 'history-fold', 'notes', fs.readdirSync(path.join(home, 'history-fold', 'notes')).find((f) => f.startsWith('day-20261001'))), 'utf8')
+    const base = path.join(home, 'history-fold', 'notes', 'abc')
+    const name = fs.readdirSync(base).find((f) => f.startsWith('day-20261001'))
+    const before = fs.readFileSync(path.join(base, name), 'utf8')
     const r = refreshNotes({ home })
     assert.equal(r.ok, true)
-    const after = fs.readFileSync(path.join(home, 'history-fold', 'notes', fs.readdirSync(path.join(home, 'history-fold', 'notes')).find((f) => f.startsWith('day-20261001'))), 'utf8')
+    const after = fs.readFileSync(path.join(base, name), 'utf8')
     assert.equal(before, after)
 })
 
@@ -179,8 +191,11 @@ await test('a corrupt log reports a reason instead of throwing', () => {
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'session.jsonl.zstd'), Buffer.from('garbage'))
     const r = refreshNotes({ home })
-    assert.equal(r.ok, false)
-    assert.ok(String(r.reason).startsWith('decode-failed'))
+    // The pass still succeeds overall (one bad log must not stop the others), but nothing is mined
+    // and the reason names the decode failure.
+    assert.equal(r.ok, true)
+    assert.equal(r.mined, 0)
+    assert.ok(String(r.reason).startsWith('decode-failed'), 'reason was: ' + r.reason)
 })
 
 await test('no session log at all is a quiet no-op', () => {

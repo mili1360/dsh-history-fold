@@ -270,6 +270,30 @@ await test('notes search: the best line of a file is the one that is quoted', ()
     assert.ok(hits[0].snippet.includes('第二行'), 'picked line: ' + hits[0].snippet)
 })
 
+// Per-session notes: another window's memory must not leak into this window's automatic recall.
+await test('ownNotesDir prefers the session folder and falls back to the root', () => {
+    const base = path.join(tmp, 'notes-perm')
+    fs.mkdirSync(path.join(base, 'sid-1'), { recursive: true })
+    fs.writeFileSync(path.join(base, 'sid-1', 'day-1.md'), '我方记忆 alpha', 'utf8')
+    fs.writeFileSync(path.join(base, 'root.md'), '共享记忆 alpha', 'utf8')
+    assert.equal(plugin.ownNotesDir(base, 'sid-1'), path.join(base, 'sid-1'))
+    // A session with no folder yet falls back to the shared root instead of returning nothing.
+    assert.equal(plugin.ownNotesDir(base, 'sid-2'), base)
+})
+
+await test('recursive note search reaches into session folders', () => {
+    const base = path.join(tmp, 'notes-recur')
+    fs.mkdirSync(path.join(base, 'sid-a'), { recursive: true })
+    fs.mkdirSync(path.join(base, 'sid-b'), { recursive: true })
+    fs.writeFileSync(path.join(base, 'sid-a', 'day-1.md'), '别的窗口 trigger 一次', 'utf8')
+    fs.writeFileSync(path.join(base, 'sid-b', 'day-1.md'), '这个窗口 trigger 两次 trigger', 'utf8')
+    const flat = searchNotes(base, ['trigger'], { maxNoteHits: 5, snippetChars: 60 })
+    assert.equal(flat.length, 0, 'flat search should not cross folders')
+    const deep = searchNotes(base, ['trigger'], { maxNoteHits: 5, snippetChars: 60, recursive: true })
+    assert.equal(deep.length, 2)
+    assert.ok(deep[0].source.includes('sid-'), 'source should name the session folder: ' + deep[0].source)
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)
