@@ -230,6 +230,46 @@ await test('the recall_memory tool registers and answers without an archive', as
   assert.equal(r.ok, true)
   assert.equal(r.hits, 0)
 })
+// The note cache is what keeps a 3.6 MB notes dir cheap per turn. A cache that never notices a
+// rewritten file would answer with stale memory -- the worst possible failure for this module.
+await test('notes cache: a rewritten note is re-read, not served stale', () => {
+    const dir = path.join(tmp, 'notes-cache')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, 'day-1.md')
+    fs.writeFileSync(file, '旧内容 alpha', 'utf8')
+    const first = searchNotes(dir, ['alpha'], { maxNoteHits: 2, snippetChars: 80 })
+    assert.equal(first.length, 1)
+    assert.equal(plugin.noteCacheSize(), 1)
+    // Same size, different bytes: the guard must be mtime-or-size, and mtime moves on Windows here.
+    fs.writeFileSync(file, '新内容 alpha', 'utf8')
+    const second = searchNotes(dir, ['alpha'], { maxNoteHits: 2, snippetChars: 80 })
+    assert.equal(second.length, 1)
+    assert.ok(second[0].snippet.includes('新内容'), 'stale note served: ' + second[0].snippet)
+})
+
+await test('notes cache: a deleted note is dropped from the cache', () => {
+    const dir = path.join(tmp, 'notes-drop')
+    fs.mkdirSync(dir, { recursive: true })
+    const a = path.join(dir, 'a.md')
+    const b = path.join(dir, 'b.md')
+    fs.writeFileSync(a, 'keeper 一号', 'utf8')
+    fs.writeFileSync(b, 'gone 二号', 'utf8')
+    searchNotes(dir, ['号码'], { maxNoteHits: 5, snippetChars: 80 })
+    assert.equal(plugin.noteCacheSize(), 2)
+    fs.rmSync(b)
+    searchNotes(dir, ['keeper'], { maxNoteHits: 5, snippetChars: 80 })
+    assert.equal(plugin.noteCacheSize(), 1, 'deleted file pinned in cache')
+})
+
+await test('notes search: the best line of a file is the one that is quoted', () => {
+    const dir = path.join(tmp, 'notes-bestline')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'n.md'), ['第一行 提到 trigger 一次', '第二行 trigger trigger trigger', '第三行 无关'].join('\n'), 'utf8')
+    const hits = searchNotes(dir, ['trigger'], { maxNoteHits: 1, snippetChars: 60 })
+    assert.equal(hits.length, 1)
+    assert.ok(hits[0].snippet.includes('第二行'), 'picked line: ' + hits[0].snippet)
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)

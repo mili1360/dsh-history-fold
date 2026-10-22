@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-22
+
+The notes dir reached 3.6 MB across 52 files, and every turn re-read and re-lowercased all of it.
+
+### Changed
+
+- **`searchNotes` keeps a parsed cache keyed on (file, mtime, size).** Notes are rewritten wholesale
+  whenever the session log changes, so nearly every file is unchanged between turns; the steady-state
+  cost is now one `stat` per file. Measured on the real 3.6 MB / 52-file notes dir: **167 ms cold →
+  5 ms warm**. Cached files that disappear from the directory are dropped, so a pruned notes dir
+  cannot pin memory.
+- **Scoring counts occurrences in the whole body once per keyword** instead of lowercasing every line
+  per keyword, and quotes the line that mentions the winning keyword *most often* (first on a tie)
+  rather than merely the first line containing it.
+
+### Notes
+
+- 3 new tests (stale-cache rewrite, deletion, densest-line choice); suite now 121. Verified in the
+  sandbox copy as well as in the repo.
+
 ## [0.5.0] - 2026-10-22
 
 Recall could only ever reach what had been *folded*. Everything else -- the whole session before the
