@@ -1,4 +1,4 @@
-// Tests for the recall module inside dsh-history-fold.
+﻿// Tests for the recall module inside dsh-history-fold.
 //
 // The recall module greps the live session's own archive (and optionally a notes dir) for the
 // keywords in the current turn. What matters here is not "does it find text" but:
@@ -295,6 +295,20 @@ await test('recursive note search reaches into session folders', () => {
     const deep = searchNotes(base, ['trigger'], { maxNoteHits: 5, snippetChars: 60, recursive: true })
     assert.equal(deep.length, 2)
     assert.ok(deep[0].source.includes('sid-'), 'source should name the session folder: ' + deep[0].source)
+})
+
+await test('crossSession: off reads only this window, on reads every window', async () => {
+  // Isolation by default; "remember everything" as an explicit opt-in.
+  const notesBase = path.join(tmp, 'notes-cross')
+  fs.mkdirSync(path.join(notesBase, 'mine'), { recursive: true })
+  fs.mkdirSync(path.join(notesBase, 'other'), { recursive: true })
+  fs.writeFileSync(path.join(notesBase, 'mine', 'day-1.md'), '本窗口的碎碎念', 'utf8')
+  fs.writeFileSync(path.join(notesBase, 'other', 'day-1.md'), '别的窗口记下了 zetaquux 这个暗号', 'utf8')
+  const mk = () => makeSession('mine', ['关于 zetaquux 你还记得吗'])
+  const off = await run(mk(), { enabled: true, recall: { enabled: true, minIntervalMs: 0, notesDir: notesBase, crossSession: false, maxChars: 3000 } })
+  assert.ok(!JSON.stringify(off).includes('zetaquux 这个暗号'), 'isolation leaked with crossSession off')
+  const on = await run(mk(), { enabled: true, recall: { enabled: true, minIntervalMs: 0, notesDir: notesBase, crossSession: true, maxChars: 3000 } })
+  assert.ok(JSON.stringify(on).includes('zetaquux 这个暗号'), 'crossSession did not reach the other window')
 })
 
 fs.rmSync(tmp, { recursive: true, force: true })
