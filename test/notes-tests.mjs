@@ -223,6 +223,35 @@ await test('a pruned session folder is rebuilt even though the stamp matches', (
     assert.ok(fs.existsSync(folder), 'notes folder was not rebuilt')
 })
 
+await test('odd session folders get unique ids instead of colliding by name', () => {
+    // Regression guard (2026-10-22 review): two projects can both contain a folder named "s".
+    // Using the bare folder name as the id would make one project overwrite the other's notes.
+    const home = path.join(tmp, 'home5')
+    makeLog(path.join(home, 'sessions', 'projA', 's'), [jsonl([USER(1, 'A 项目的话', T1)])])
+    makeLog(path.join(home, 'sessions', 'projB', 's'), [jsonl([USER(2, 'B 项目的话', T1)])])
+    const logs = plugin.allSessionLogs(home)
+    assert.equal(logs.length, 2)
+    assert.notEqual(logs[0].sid, logs[1].sid, 'two "s" folders share one id')
+    assert.ok(logs.every((l) => l.sid.startsWith('f_')), 'odd folders should be hash-named: ' + logs.map((l) => l.sid).join(','))
+    const r = refreshNotes({ home })
+    assert.equal(r.ok, true)
+    assert.equal(r.mined, 2)
+    const folders = fs.readdirSync(path.join(home, 'history-fold', 'notes')).filter((f) => f.startsWith('f_'))
+    assert.equal(folders.length, 2, 'notes folders collided')
+})
+
+await test('no session cap by default: every session log is mined', () => {
+    const home = path.join(tmp, 'home6')
+    for (let i = 0; i < 5; i++) makeLog(path.join(home, 'sessions', 'p', 'session-s' + i), [jsonl([USER(i + 1, '会话 ' + i, T1)])])
+    const r = refreshNotes({ home })
+    assert.equal(r.ok, true)
+    assert.equal(r.sessions, 5)
+    assert.equal(r.mined, 5, 'default cap dropped sessions')
+    // An explicit cap still works when someone wants one.
+    const capped = refreshNotes({ home, maxSessions: 2 })
+    assert.equal(capped.mined, 0, 'unchanged logs should be skipped, not re-mined: ' + capped.mined)
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\nnotes: ' + passed + ' passed, ' + failed + ' failed')
 if (failed) process.exit(1)

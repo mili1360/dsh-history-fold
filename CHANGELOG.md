@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-10-22
+
+Two remaining risks from the 0.6.0 review, closed.
+
+### Fixed
+
+- **Odd session folders no longer collide.** A folder whose name is not `session-<uuid>` used to become
+  the note id verbatim, so two projects that both contain a folder named `s` shared one notes folder.
+  Those now get `f_<sha1(path)[0..10]>`. Verified on the live home: 71 log files, 71 unique ids.
+- **No implicit session cap.** The pass used to stop after 200 logs; the default is now "every session
+  found" (`maxSessions: 0`), with a positive value as an explicit opt-in.
+
+### Notes
+
+- 2 new tests (id collision across projects, no default cap); suite now **126**.
+
 ## [0.6.0] - 2026-10-22
 
 Notes were one flat folder fed by whichever session log changed last, so two windows took turns
