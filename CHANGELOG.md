@@ -1,9 +1,29 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.6.4] - 2026-10-24
+
+### Added
+
+- **`engines.dsh` in the manifest** (`>=0.1.0-rc.2 <0.3.0-0`). A DSH build that checks plugin
+  compatibility can now answer "does this plugin support my runtime?" before mounting it. An
+  undeclared range means "no gate at all", which is how a plugin ends up silently doing nothing
+  on a version it never supported.
+- **A `boot` line in `logs/history-fold.jsonl`** on every load:
+  `{"mark":"boot","plugin":...,"version":...,"host":"v24.x","tools":true}`. Without it, "loaded
+  and then did nothing" and "never loaded at all" look identical from the outside. The line obeys
+  `enabled: false` -- a disabled plugin stays completely silent, as the tests require.
+
+### Verified
+
+- Mounted on `@deepseek-ai/dsh@0.2.1-rc.2` in an isolated `DSH_HOME`: plugin loads and `ctx.tools`
+  is present. Hook signatures for `tools/pre-execute`, `tools/post-execute` and `session/event`
+  are unchanged from 0.1.x; `agent/pre-step` only exists from 0.2.x onward.
+- 128 unit tests pass (19 fold + 23 recall + 17 notes + 30 edge + 31 ratio + 8 profile).
 
 ## [0.6.3] - 2026-10-22
 

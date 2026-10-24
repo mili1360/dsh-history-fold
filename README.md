@@ -23,9 +23,11 @@ This plugin folds the **oldest** part of that visible history into a single mess
   committed, and the replacement tells the model exactly where to look.
 - **No `node_modules` patching.** It uses the same public surface-replacement mechanism as
   the shipped compactor, so a DSH upgrade cannot break it.
-- **Also works on DSH 0.2.0** (`0.2.0-rc.2`), which changed four things this plugin depends on
-  — two of which fail silently. See
-  [DSH 0.2.0](#dsh-020-0200-rc2--supported) for what changed and how each was measured.
+- **Also works on DSH 0.2.x** (`0.2.0-rc.2`, `0.2.1-rc.2`), which changed four things this plugin
+  depends on — two of which fail silently. See
+  [DSH 0.2.x](#dsh-02x-0200-rc2--021-rc2--supported) for what changed and how each was measured.
+- **Declares what it supports.** `engines.dsh` is set to `>=0.1.0-rc.2 <0.3.0-0`, so a loader that
+  checks compatibility can tell you *before* mounting it rather than after it misbehaves.
 
 ---
 
@@ -231,11 +233,19 @@ upstream release. Another version may register its services or name its events d
 this plugin touches `ctx.on`, `ctx.effect`, `ctx.tokenMeter`, `ctx.reflect`, `ctx.llm` and the
 `agent/pre-step` event.
 
-### DSH 0.2.0 (`0.2.0-rc.2`) — supported
+### DSH 0.2.x (`0.2.0-rc.2`, `0.2.1-rc.2`) — supported
 
 Verified on 0.2.0 end to end: three consecutive folds, every turn completing, the folded
 message persisted to `session.v4.jsonl.zstd`, the session reloaded after a restart and kept
 folding, and the nested tier link present on disk.
+
+On 0.2.1-rc.2 the plugin was mounted into a clean profile in its own `DSH_HOME` and came up
+(log line `{"mark":"boot","plugin":"dsh-history-fold","version":"...","tools":true}`), which
+also proves `ctx.tools` is available there. Its hook signatures are unchanged in 0.2.1-rc.2:
+`tools/pre-execute (exec, next)`, `tools/post-execute (exec, result, next)`,
+`session/event (session, event)`. One thing to know: **`agent/pre-step` does not exist in
+0.1.0-rc.8 at all** (the string appears only in comments there) and does exist in 0.2.1 — so a
+listener on it is inert on 0.1.x and becomes live after the upgrade.
 
 Four of its API changes had to be handled, and three of them fail **silently**:
 
