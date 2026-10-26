@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-26
+
+### Added
+
+- **Precise recall layer (`lib/rare.js`)**, tried before the keyword matcher.
+  - `recall.entityMapFile` points at a JSON table of `{key, file, line, title}`. A curated hit
+    is deterministic: the key appears in the message, the plugin serves that exact location.
+    The table is plain JSON on disk, so a user extends it by editing one file.
+  - Without a table hit, an **identifier-shaped** term (digits, dots, dashes or an inner
+    capital, length >= 5) that lives in **at most `recall.rareMaxDf` (default 2) files** is
+    used to locate the section.
+  - Both paths refuse to serve today's own note file: reading back what was written minutes ago
+    is self-reference, not memory.
+- **`recall.strict`** (default `false`). `false` keeps the old behaviour: if the precise layer
+  finds nothing, the previous keyword/embedding path still runs. `true` means "no precise hit,
+  no injection at all": quieter, and every injected line is one that could be located.
+
+### Fixed
+
+- **Recall was always one turn behind.** `agent/pre-step` fires while the current user message
+  is still in the inbox, so `lastUserText(session)` returned the *previous* turn's words
+  (measured 2026-10-26: `events: 6`, no `user/message`, empty text on a fresh session). The
+  handler now reads the claimed `payload.messages` first and only falls back to the session.
+- **Short messages were skipped before the precise layer could run.** The `tooShort` gate now
+  applies only when the precise layer found nothing, so a four-character topic is no longer
+  discarded as chit-chat.
+- **A precise hit is no longer diluted.** When the table or the rare-term path hits, the
+  keyword/embedding fallback does not also run (it used to turn one correct hit into three,
+  two of them unrelated).
+
+### Verified
+
+- 16 new tests in `test/rare-tests.mjs` (fake notes + table in a temp dir): table hit, Chinese
+  key, identifier shapes, refusals (chat, 2-gram junk, prose English), today-file exclusion.
+- Real-conversation check in an isolated `DSH_HOME`: `dpapi` -> `route: rare`, one hit,
+  158 chars injected; `有点牛逼啊` -> skipped as `strict-no-rare:no-identifier`.
+- Full suite (all seven test files) passes.
+
 ## [0.6.4] - 2026-10-24
 
 ### Added

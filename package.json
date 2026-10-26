@@ -1,6 +1,6 @@
 {
   "name": "dsh-history-fold",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "Fold the oldest part of a DSH session's surface history into one message that points at a lossless local archive, so a long session stops paying for its whole history on every request.",
   "keywords": [
     "dsh-plugin",
@@ -42,12 +42,13 @@
     "dsh": ">=0.1.0-rc.2 <0.3.0-0"
   },
   "scripts": {
-    "test": "node test/fold-tests.mjs && node test/profile-tests.mjs && node test/edge-tests.mjs && node test/ratio-tests.mjs && node test/recall-tests.mjs && node test/notes-tests.mjs",
+    "test": "node test/fold-tests.mjs && node test/profile-tests.mjs && node test/edge-tests.mjs && node test/ratio-tests.mjs && node test/recall-tests.mjs && node test/notes-tests.mjs && node test/rare-tests.mjs",
     "test:fold": "node test/fold-tests.mjs",
     "test:profile": "node test/profile-tests.mjs",
     "test:edge": "node test/edge-tests.mjs",
     "test:ratio": "node test/ratio-tests.mjs",
     "test:recall": "node test/recall-tests.mjs",
+    "test:rare": "node test/rare-tests.mjs",
     "test:mutate": "node test/mutations.cjs",
     "test:all": "npm test && npm run test:mutate",
     "test:notes": "node test/notes-tests.mjs"

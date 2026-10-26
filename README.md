@@ -318,12 +318,36 @@ every turn**, so edits apply without a restart.
 | `notes.minEventScore` | `3` | Strictness of the ledger. Raise to 4 for fewer, cleaner lines. |
 | `notes.startDelayMs` | `45000` | First pass waits this long so boot is never slowed. |
 | `notes.maxLogMB` | `600` | Safety valve: a bigger log is skipped rather than read into the heap. |
+| `recall.strict` | `false` | `true` ⇒ if the precise layer (entity map / rare identifiers) finds nothing, inject nothing. `false` ⇒ fall back to the keyword/embedding paths as before. |
+| `recall.entityMapFile` | `dsh-history-fold/entity-map.json` | JSON table of `{key, file, line, title}`. A key that appears in the user's message serves that exact location, no scoring. Edit the file to teach it a topic. |
+| `recall.rareMaxDf` | `2` | A rare identifier must appear in at most this many note files to be used as a locator. |
 
 > `notes.*` is read when the plugin loads, so changes to it need a restart; everything else on this
 > table is re-read every turn.
 
-### Mining the session log into notes
+### How a recall hit is chosen
 
+Three routes, tried in this order, and the first one that produces anything wins:
+
+1. **Entity map** — `recall.entityMapFile` is plain JSON: `{"key":"tiger-maus","file":"day-20261024.md","line":1709,"title":"…"}`.
+   If `key` appears in the user's message (case-insensitive), that location is served. Deterministic,
+   zero scoring. Extend it by editing the file; no restart needed.
+2. **Rare identifiers** — a term shaped like a name (digits, dots, dashes, or an inner capital,
+   length ≥ 5) that appears in at most `recall.rareMaxDf` note files. The reasoning is measured:
+   `tiger-maus` lives in 2 files while "how/previous/that" live in all of them, so ranking by
+   occurrence buries the only term that could locate anything.
+3. **Keyword/embedding fallback** — the previous behaviour, and it is noisy by nature (2-gram
+   cutting turns "有点牛逼啊" into `呲牛/牛逼/逼啊`). Set `recall.strict: true` to turn it off
+   entirely: then an injection only ever happens when route 1 or 2 found something.
+
+Two rules apply to every route:
+
+- **The current turn's words, not the previous turn's.** The claimed `payload.messages` are read
+  first; `agent/pre-step` runs before the message reaches `session.events`.
+- **Today's own note file is never served.** Reading back what was written minutes ago is
+  self-reference, not memory.
+
+### Mining the session log into notes
 Folding only ever covers what has been folded. `lib/notes.js` closes that gap: it decodes the newest
 `$DSH_HOME/sessions/**/session.jsonl.zstd` (concatenated zstd frames, decoded in pure Node) and
 writes two kinds of markdown into `notes.dir`, which recall searches alongside the archive:
