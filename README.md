@@ -321,6 +321,10 @@ every turn**, so edits apply without a restart.
 | `recall.strict` | `false` | `true` ⇒ if the precise layer (entity map / rare identifiers) finds nothing, inject nothing. `false` ⇒ fall back to the keyword/embedding paths as before. |
 | `recall.entityMapFile` | `dsh-history-fold/entity-map.json` | JSON table of `{key, file, line, title}`. A key that appears in the user's message serves that exact location, no scoring. Edit the file to teach it a topic. |
 | `recall.rareMaxDf` | `2` | A rare identifier must appear in at most this many note files to be used as a locator. |
+| `recall.entityMapAutoFile` | `dsh-history-fold/entity-map.auto.json` | The **auto-built** table. Rebuilt from the notes, never hand-edited. |
+| `recall.autoMapMinutes` | `30` | Rebuild the auto table when it is older than this. |
+| `recall.autoMapMaxDf` | `4` | The auto table may be broader than the live scan, because a table hit is exact by construction. |
+| `recall.autoMapLimit` | `600` | Cap on auto-table rows (keeps the per-turn lookup cheap). |
 
 > `notes.*` is read when the plugin loads, so changes to it need a restart; everything else on this
 > table is re-read every turn.
@@ -346,6 +350,19 @@ Two rules apply to every route:
   first; `agent/pre-step` runs before the message reaches `session.events`.
 - **Today's own note file is never served.** Reading back what was written minutes ago is
   self-reference, not memory.
+
+#### The table builds itself
+
+`entity-map.auto.json` is generated from `notes.dir` and rebuilt whenever it is older than
+`recall.autoMapMinutes`. The signal is narrow on purpose: a name-shaped term (digits, dots, dashes,
+inner capitals, length 4-24) that the human typed **into a `##` heading**, occurring in at most
+`recall.autoMapMaxDf` note files. Scanning body text instead produced 3,032 candidates, almost all
+of them code symbols, file names and function names; headings are the user's own words, and that
+cuts it to a couple of hundred useful ones.
+
+The hand-written table is still read first and is never overwritten. One guard applies to both:
+a heading containing a credential (密码 / 口令 / password / token / key) keeps its location but its
+wording is replaced with `(含凭据，标题已隐藏)`, because titles are injected into the model's context.
 
 ### Mining the session log into notes
 Folding only ever covers what has been folded. `lib/notes.js` closes that gap: it decodes the newest

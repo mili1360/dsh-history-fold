@@ -1,10 +1,10 @@
-// Tests for the precise recall layer (lib/rare.js): the curated entity map and the rare
-// identifier search. Fixtures are created in a temp dir, so these tests never depend on the
-// machine's real notes.
+// Tests for the precise recall layer (lib/rare.js): the curated entity map, the auto-built
+// table, and the rare identifier search. Fixtures are created in a temp dir, so these tests
+// never depend on the machine's real notes.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { searchRare, readEntityMap, looksLikeIdentifier } from '../lib/rare.js'
+import { searchRare, readEntityMap, rebuildAutoMap, looksLikeIdentifier } from '../lib/rare.js'
 
 let pass = 0
 let fail = 0
@@ -25,12 +25,12 @@ const notesDir = path.join(root, sid)
 fs.mkdirSync(notesDir, { recursive: true })
 
 fs.writeFileSync(path.join(notesDir, 'day-20260101.md'), [
-    '# 这一天（20260101）',
+    '# 20260101',
     '## 不是保底，是450金币买的一个箱子',
     '开箱就出 Tiger-Maus，直接领走。',
     '',
     '## 凭据保险箱',
-    '用的是 `dpapi`，不是明文。',
+    '用的是 dpapi，不是明文。',
 ].join('\n'), 'utf8')
 
 fs.writeFileSync(path.join(notesDir, 'day-20260102.md'), [
@@ -104,6 +104,41 @@ console.log('rare: refusals')
     ok('today-only matches are not memory', r.hits.every((h) => !String(h.file).endsWith(today)))
 }
 
+console.log('rare: auto table')
+
+{
+    // The auto table is generated from the notes: a name-shaped term the human typed into a
+    // heading, occurring in at most maxDf files. The fixture therefore needs a heading that
+    // itself names something -- a body mention is not enough (that is the whole point).
+    const autoNotes = path.join(root, 'auto-session')
+    fs.mkdirSync(autoNotes, { recursive: true })
+    fs.writeFileSync(path.join(autoNotes, 'day-20260104.md'), [
+        '## Tiger-Maus 那次是怎么来的',
+        '开箱出的。',
+    ].join('\n'), 'utf8')
+    const autoFile = path.join(root, 'entity-map.auto.json')
+    const built = rebuildAutoMap(autoNotes, autoFile, { maxDf: 2, limit: 50 })
+    ok('the auto table is written', built.written > 0, JSON.stringify(built))
+    const rows = readEntityMap(autoFile)
+    ok('it keeps the dashed identifier', rows.some((r) => r.key === 'tiger-maus'), JSON.stringify(rows.map((r) => r.key)))
+    ok('it does not keep plain prose', !rows.some((r) => r.key === 'injection'))
+}
+
+{
+    // a heading that carries a credential keeps its location but withholds the wording
+    const secretDir = path.join(root, 'secret-session')
+    fs.mkdirSync(secretDir, { recursive: true })
+    fs.writeFileSync(path.join(secretDir, 'day-20260103.md'), [
+        '## 账号密码 wotb2026 记牢了',
+        '存起来了。',
+    ].join('\n'), 'utf8')
+    const secretFile = path.join(root, 'entity-map.secret.json')
+    rebuildAutoMap(root, secretFile, { maxDf: 4, limit: 50 })
+    const secretRows = readEntityMap(secretFile).filter((r) => String(r.file).includes('day-20260103'))
+    ok('a credential heading is still indexed', secretRows.length > 0, JSON.stringify(secretRows))
+    ok('but its wording is withheld', secretRows.every((r) => !/wotb2026/.test(r.title)))
+}
+
 fs.rmSync(root, { recursive: true, force: true })
-console.log(`\nrare: ${pass} passed, ${fail} failed`)
+console.log('\nrare: ' + pass + ' passed, ' + fail + ' failed')
 if (fail > 0) process.exit(1)

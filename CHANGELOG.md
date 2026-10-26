@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-10-26
+
+### Added
+
+- **The entity table builds itself.** `lib/rare.js` now exports `rebuildAutoMap()`, and recall
+  calls it whenever `entity-map.auto.json` is older than `recall.autoMapMinutes` (default 30).
+  The table is generated from `notes.dir` with one narrow signal: a name-shaped term (digits,
+  dots, dashes, inner capitals, length 4-24) that the user typed **into a `##` heading**, living
+  in at most `recall.autoMapMaxDf` (default 4) note files.
+  - Body text was measured first and rejected: 3,032 candidates, almost all code symbols, file
+    names and function names. Headings are the user's own words and cut it to ~200 useful terms.
+  - The hand-written `entity-map.json` is read first and is never overwritten.
+  - Duplicate locations across session folders are collapsed to one row.
+- **Credential guard for titles.** A heading matching `密码|口令|password|token|api key|密钥` keeps
+  its location but its wording becomes `(含凭据，标题已隐藏)`. Titles are injected into the model's
+  context, so copying the heading verbatim would write a password into the conversation log.
+
+### Verified
+
+- 21 tests in `test/rare-tests.mjs` (was 16): auto-table generation from a heading, prose
+  rejection, duplicate collapse, and the credential guard.
+- Real notes on this machine: 202 terms -> 238 rows, and `forge-tax` resolves to
+  `day-20261025.md:1404` through the auto table.
+
 ## [0.7.0] - 2026-10-26
 
 ### Added
