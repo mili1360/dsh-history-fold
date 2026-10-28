@@ -20,6 +20,27 @@ stable across 35 consecutive turns (ratio 1.737–1.769). A trigger tuned in sur
 
 ## What changed
 
+### The shipped default was the same bug, one level up
+
+`triggerRatio` defaulted to `0.75`. That ratio multiplies **DSH's meter**, not the real request, so
+`0.75 × 1,000,000` meant a *real* prompt of ~1.31M tokens — past the window, and far past the
+compactor's 0.8 line. Every install that did not set an absolute `triggerSurfaceTokens` (the common
+case) inherited a threshold that could never be reached.
+
+| key | was | now | why |
+|---|---|---|---|
+| `triggerRatio` | `0.75` | **`0.33`** | 0.33 × 1M = 330k meter ≈ 578k real, ~222k real tokens clear of the compactor's 800k |
+| `targetRatio` | `0.18` | **`0.14`** | below the compactor's own 0.16 retain ratio |
+| `emergencyTriggerRatio` | `0.8` | **`0.42`** | the old value was ~1.4× the window in real tokens: a second chance that could never arrive |
+| `emergencyTriggerSurfaceTokens` | `800000` | **`320000`** | same reason, absolute form |
+
+An explicit `triggerSurfaceTokens` / `targetSurfaceTokens` in `config.json` still wins — absolute
+keys are untouched. On English-heavy history the meter tracks the real count closely, so a ratio
+this low folds earlier than strictly necessary; that is the deliberate direction, since folding
+early costs one archive write and folding late costs the original text.
+
+### Unreachable thresholds are announced
+
 `resolveThresholds()` now reports, and the plugin logs once per distinct resolved pair:
 
 | warning | meaning |
@@ -32,7 +53,7 @@ Each named condition is one grep away instead of three weeks away. No window res
 made — an unknown context window produces no warning rather than a guessed one.
 
 Tests: `ratio` suite 31 → **36**, including a case that reproduces the exact shipped
-`750000 / 1M` pair and asserts it is announced. All 7 suites green (155 → 160 assertions).
+`750000 / 1M` pair and asserts it is announced. All 7 suites green.
 
 ## Install
 
