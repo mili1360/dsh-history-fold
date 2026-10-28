@@ -26,6 +26,12 @@ dsh plugin add --profile web github:mili1360/dsh-history-fold
 > 会 404。上面这条 git 形式是唯一的官方路径，直接解析仓库、不经过 registry。
 > 装完**重启 DSH** 才生效（bundle 只在启动时注册）。
 
+想要一个**固定版本、不会变**的安装包？每个 Release 都带 tarball，同样不经过 registry：
+
+```bash
+dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.1/dsh-history-fold-0.8.1.tgz
+```
+
 ---
 
 ## 0.8.0 更新：它学会了**什么时候不该打断你**

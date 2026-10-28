@@ -214,6 +214,12 @@ dsh plugin add --profile web github:mili1360/dsh-history-fold
 > `npm install dsh-history-fold` will 404. The git form above is the supported path and is what
 > the maintainer uses; it resolves the repo directly and needs no registry at all.
 
+Prefer a pinned, immutable artifact? Every release ships its tarball, no registry involved:
+
+```bash
+dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.1/dsh-history-fold-0.8.1.tgz
+```
+
 That resolves the package over git, adds it to the profile's `dependencies`, and registers
 the bundle in `dsh.profile.bundles` on its own — verified on `0.2.0-rc.2`. Then **restart
 DSH**: a registered bundle is only picked up at boot.
