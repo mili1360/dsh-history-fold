@@ -4,12 +4,14 @@ name: publish
 # GitHub mints a short-lived identity for this job, npm verifies it against the trusted
 # publisher configured for the package, and the credential expires when the job ends.
 #
-# NOTE: OIDC publish only works for a package that ALREADY exists on npm. The very first
-# publish has to happen once with a token or `npm login`; after that this job takes over.
+# Two entry points, deliberately separated:
+#   - push a v* tag   -> tests + package verification only. A tag must never depend on registry
+#                        credentials, otherwise every release is red until npm is reachable.
+#   - manual dispatch -> the actual publish. Run it once the package's trusted publisher (or an
+#                        NPM_TOKEN secret) is configured on npmjs.com.
 #
-# Requirements, both of which the run below enforces or documents:
-#   - `id-token: write` on the job (without it there is no OIDC token to exchange)
-#   - npm >= 11.5.1 in the runner (OIDC publishing landed there; setup-node ships an older one)
+# NOTE: OIDC publish only works for a package that ALREADY exists on npm. The very first publish
+# has to happen once with a token or `npm login`; after that this job takes over.
 on:
   push:
     tags:
@@ -21,7 +23,7 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +53,22 @@ jobs:
           node -e "const p=require('./package.json'); if(!p.files.includes('model')) { console.error('model/ missing from package.json files'); process.exit(1) }"
           test -f model/gate-model.json
           npm pack --dry-run
+
+  publish:
+    # Only on a manual run — a tag must not require registry credentials.
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm version
+        run: npm install -g npm@latest
 
       - name: publish
         run: npm publish --access public
