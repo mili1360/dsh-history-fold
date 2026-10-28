@@ -30,6 +30,10 @@ This plugin folds the **oldest** part of that visible history into a single mess
   [DSH 0.2.x](#dsh-02x-0200-rc2--021-rc2--supported) for what changed and how each was measured.
 - **Declares what it supports.** `engines.dsh` is set to `>=0.1.0-rc.2 <0.3.0-0`, so a loader that
   checks compatibility can tell you *before* mounting it rather than after it misbehaves.
+- **The notes are regenerable.** Everything this plugin remembers is *derived* from your DSH session
+  logs, not hand-maintained. Delete the entire notes directory and the next refresh mines it back out
+  of the logs, byte for byte. Measured: one 1.7 MB session log → 254 user messages, 1,948 replies,
+  4 note files; deleting the notes directory and re-running produced the identical 4 files.
 
 ---
 

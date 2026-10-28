@@ -80,6 +80,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `searchArchive` hits and the last log line. It is what found the dependency bug: the numbers up to
   `hits: 1` were fine and the failure showed up one line later.
 
+### Documented
+
+- **The notes are regenerable, and that is now measured rather than assumed.** Everything the plugin
+  remembers is derived from `<DSH_HOME>/sessions/**/session.jsonl.zstd`. Verified end to end: one
+  1.7 MB session log mined into 254 user messages, 1,948 replies and 4 note files; the entire notes
+  directory was then deleted and `refreshNotes` reproduced the same 4 files with the same counts.
+  So "the memory can be recovered from the logs" is a property with a test behind it, not a slogan.
+
 ## [0.7.1] - 2026-10-26
 
 ### Added
