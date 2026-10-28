@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A flaky test: `notes cache: a rewritten note is re-read` failed about one run in three when the
   rewrite kept the byte length (NTFS mtime resolution cannot separate two writes in the same
   millisecond). The fixture now changes the size too.
+- **CI has been red since 0.6.4, and the cause was a real dependency bug.** Injection imported
+  `@deepseek-ai/dsh-llm` to build the message. That package exists inside a DSH installation but
+  *not* in this repository, so in CI the retrieval succeeded (`hits: 1`) and then the injection
+  threw `Cannot find package '@deepseek-ai/dsh-llm'` — four tests failed while the same code passed
+  on a machine that happens to have DSH installed. A missing package is now tolerated: the code
+  falls back to a minimal message constructor (`recall-<time>-<n>` ids). Nothing changes on a real
+  DSH host, where the package is always present.
+- **Unit tests no longer depend on the trained model.** `recall.gate: false` turns the classifier
+  layer off, and the test harness sets it by default — the decision logic is now tested against a
+  fixed input instead of whatever `model/gate-model.json` happens to contain. The classifier got its
+  own tests (loads and separates obvious cases; a missing model file degrades to "no opinion").
 
 ## [0.7.1] - 2026-10-26
 
