@@ -77,6 +77,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (452,024 surface = 790,915 real prompt tokens, stable across 35 consecutive turns). A trigger
   tuned in surface units therefore sits ~1.75x higher in real tokens than it looks.
 
+### Changed
+
+- **The shipped `triggerRatio` default is now `0.33`, not `0.75`** (`targetRatio` `0.14`, not
+  `0.18`; `emergencyTriggerRatio` `0.42`, not `0.8`; `emergencyTriggerSurfaceTokens` `320000`, not
+  `800000`). The old ratio was itself the bug: the ratio is applied to DSH's meter, which
+  under-reports Chinese-heavy prompts by ~1.75x, so `0.75 × window` meant a *real* prompt of
+  ~1.31 × window — past the window, and far past `dsh-compaction-basic`'s 0.8 line, which
+  therefore always fired first. Any install that had no absolute `triggerSurfaceTokens` set (the
+  common case) inherited a threshold that could never be reached. `0.33 × 1M = 330k` meter units
+  ≈ 578k real tokens, still ~222k real tokens ahead of the compactor.
+
+  **This only affects installs that do not set the thresholds explicitly.** A `config.json`
+  carrying `triggerSurfaceTokens` / `targetSurfaceTokens` is untouched — absolute keys still win
+  over ratios, exactly as before.
+
+  On English-heavy history the meter stays close to the real count, so a ratio this low folds
+  earlier than strictly necessary. That is the deliberate direction: folding early costs one
+  archive write, folding late costs the original text.
+
 ## [0.8.1] - 2026-10-28
 
 ### Fixed

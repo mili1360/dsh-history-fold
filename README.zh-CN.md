@@ -33,7 +33,7 @@ dsh plugin add --profile web github:mili1360/dsh-history-fold
 想要一个**固定版本、不会变**的安装包？每个 Release 都带 tarball，同样不经过 registry：
 
 ```bash
-dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.1/dsh-history-fold-0.8.1.tgz
+dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.2/dsh-history-fold-0.8.2.tgz
 ```
 
 ---
@@ -109,9 +109,10 @@ session.append('user/message', message, {
 
 `dsh-session` 随后把替换节点 splice 回**被折区间的原位置**，时间顺序不变。
 
-**触发线不是固定的 25 万 token**：默认是"上下文窗口的 `0.75`"，折到窗口的 `0.18` ✓
+**触发线不是固定的 25 万 token**：默认是"上下文窗口的 `0.33`"，折到窗口的 `0.14` ✓
 窗口能解析出来就按比例走，`config.json` 里显式写了绝对值则绝对值优先 ✓
-详见 [配置](#配置) 里的解析顺序 ✓
+（0.33 看着偏早是**故意的**：那个比例乘的是 DSH 的计量器，而它对中文少报约 1.75 倍 ——
+详见下面「两个阈值是怎么算出来的」那一节 ✓）
 
 ### 写之前核对过的硬规则（全部来自真实源码，不是猜的）
 
@@ -233,8 +234,8 @@ The one-line index below is extractive, not a rewritten summary ...
   "profile": true,
   "triggerSurfaceTokens": 250000,
   "targetSurfaceTokens": 180000,
-  "triggerRatio": 0.75,
-  "targetRatio": 0.18,
+  "triggerRatio": 0.33,
+  "targetRatio": 0.14,
   "keepRecentNodes": 60,
   "minFoldNodes": 20,
   "minFoldTokens": 20000,
@@ -249,8 +250,10 @@ The one-line index below is extractive, not a rewritten summary ...
 }
 ```
 
-装完就是开着的：默认会真折 ✓ 但只在窗口占用过 `triggerRatio`（0.75）时才动手 ✓
-那是内置压缩（0.8）下面的那条线 ✓ 而且每个被折的节点都先逐字存档再离开可见历史 ✓
+装完就是开着的：默认会真折 ✓ 但只在窗口占用过 `triggerRatio`（**0.33**）时才动手 ✓
+这个值刻意压得比较早 —— 比例乘的是 DSH 的计量器，而它对中文少报约 1.75 倍，
+按比例数字取 0.75 会让真实的请求在触发前就撞上窗口 ✗ 详见下面那一节 ✓
+而且每个被折的节点都先逐字存档再离开可见历史 ✓
 想先只看不写，就建配置写 `{ "dryRun": true }`，看日志里的数字满意了再改回 `false` ✓
 
 | 键 | 默认 | 说明 |
@@ -258,12 +261,12 @@ The one-line index below is extractive, not a rewritten summary ...
 | `enabled` | `true` | 总开关 ✓ `false` = 加载了但完全空转 |
 | `dryRun` | `false` | `true` = 只看只记，绝不写 |
 | `profile` | `true` | 每轮写一份体积剖析 |
-| `triggerSurfaceTokens` | `250000` | 绝对触发线，**兜底用**（见下面的解析顺序）✓ 写在 `config.json` 里就优先于 `triggerRatio` |
-| `targetSurfaceTokens` | `180000` | 绝对目标，**兜底用** ✓ 同上 ✓ **必须够得着**（见下） |
-| `triggerRatio` | `0.75` | 可见历史超过**上下文窗口的这个比例**才折 ✓ 窗口能解析出来、且没写绝对值时用它 |
-| `targetRatio` | `0.18` | 折到大约窗口的这个比例就停 |
-| `emergencyTriggerRatio` | `0.8` | 第二道闸。下一轮还停在这个比例之上 ⇒ 上一次没折成，用下面的放宽参数再折一次 |
-| `emergencyTriggerSurfaceTokens` | `800000` | 第二道闸的绝对值形式（窗口解析不出来时用）✓ 永远不会低于正常触发线 |
+| `triggerSurfaceTokens` | `250000` | 绝对触发线，**窗口解析不出来时兜底** ✓ 写了就优先于 `triggerRatio` ✓ 中文重的内容请先看下面那一节再定这个数 |
+| `targetSurfaceTokens` | `180000` | 绝对目标，同样是兜底 ✓ **必须够得着**（见下） |
+| `triggerRatio` | `0.33` | 可见历史超过**上下文窗口的这个比例**才折 ✓ 注意这个比例乘的是 DSH 的计量器，而它对中文少报（实测约 1.75 倍），所以刻意压在官方 0.8 那条线之下 —— 见下面那一节 |
+| `targetRatio` | `0.14` | 折到大约窗口的这个比例就停 ✓ 比官方那份摘要保留的 0.16 还低 |
+| `emergencyTriggerRatio` | `0.42` | 第二道闸。下一轮还停在这个比例之上 ⇒ 上一次没折成，用下面的放宽参数再折一次 |
+| `emergencyTriggerSurfaceTokens` | `320000` | 第二道闸的绝对值形式（窗口解析不出来时用）✓ 永远不会低于正常触发线 |
 | `emergencyKeepRecentNodes` | `12` | 急折时还允许保住多少最近节点（与 `keepRecentNodes` 取小） |
 | `emergencyMinFoldNodes` | `4` | 急折的节点数下限 |
 | `emergencyMinFoldTokens` | `2000` | 急折的 token 下限 |
@@ -301,12 +304,33 @@ The one-line index below is extractive, not a rewritten summary ...
    和官方 `dsh-compaction-basic` 算自己那条线用的是同一个查询 ✓
 3. **否则** ⇒ 用出厂的绝对默认值，日志里写 `default` ✓
 
-**为什么默认是 0.75 / 0.18，而且必须压在官方那条线下面。**
-官方 `dsh-compaction-basic` 在 `thresholdRatio × contextWindow` 触发 —— 默认 `0.8 × 100 万` =
-80 万 —— 并保留 `0.16 × 窗口`（16 万）✓ 它的替代品是**模型写的摘要**，是有损的 ✓
-`0.75`（100 万窗口的 75 万）**刚好压在那条线之下**，这就是"让摘要器永远不触发"的办法；
-`0.18`（18 万）对应它的 0.16 ✓ 这两个默认值就是本项目自己那套绝对值（75 万 / 18 万，
-即 100 万窗口的 0.75 / 0.18）写成了比例，换个窗口也照样成立 ✓
+**★ 触发线要按「真实 prompt」校准，不能只看那个数字。**
+`surfaceTokens` 是 DSH 自己的计量器，**中文内容下它会少报**：实测同一个会话
+`surfaceTokens: 452,024`，而 API 请求实际是 **790,915** token（`cacheReadTokens + inputTokens`），
+比例 **1.737–1.769，连续 35 轮稳定** ✓ 所以「数字上看着稳稳压在官方线下面」的阈值，
+按真实 token 算可能已经越过窗口了 ✗
+
+这不是假设：本插件曾用 `triggerSurfaceTokens: 750000` 对着 100 万窗口跑了**三周，一次没折**：
+
+| 配置看起来 | 实际意味着 |
+|---|---|
+| 75 万「= 100 万窗口的 0.75」 | **131 万真实 token** —— 比窗口本身还大 |
+| 触发线 75 万 vs 官方压缩 80 万 | 够不着：官方压缩总先到，把历史改写成模型摘要 |
+| 日志 | `idle`、`"surfaceTokens": 452024`、`"trigger": 750000` —— 读起来完全像「还不需要」 |
+
+**所以先量你自己的比例，再定数字**：
+
+1. 从 `$DSH_HOME/logs/history-fold.jsonl` 取一条 `profile` 的 `surfaceTokens`
+2. 从 `$DSH_HOME/logs/vitals/vitals-*.jsonl` 取**同一轮**的 `cacheReadTokens + inputTokens`
+3. 相除。让 `triggerSurfaceTokens × 这个比例` 稳稳低于 `0.8 × contextWindow`
+
+本项目开发用的那台（100 万窗口、中文为主）比例约 **1.75**，所以工作值是
+**`triggerSurfaceTokens: 300000` / `targetSurfaceTokens: 130000`** —— 真实约 52.8 万
+（窗口的 52.8%）触发折叠，保留约 23.4 万，距官方 80 万那条线还有约 27 万真实 token 余量 ✓
+
+**0.8.2 起这件事插件自己会查**：触发线 ≥ `0.8 × 窗口`、或 ≥ 窗口本身、或目标 ≥ 触发线，
+都会按「每组不同的解析结果只写一条」的规则写 `threshold-warning` 日志 ——
+下一个配置错误是**一次 grep 的距离**，不是三周 ✗
 
 每一条 profile / 折叠日志都带着这些字段：`windowTokens`（解析到的窗口，没有就是 `null`）、
 `triggerSource` / `targetSource` = `absolute` | `ratio` | `default` ✓
@@ -322,7 +346,14 @@ The one-line index below is extractive, not a rewritten summary ...
 | 原文还在吗 | ✗ 只剩摘要 | ✓ 逐字写在 `$DSH_HOME/history-fold/archive/` | n/a |
 | 能找回来吗 | ✗ | ✓ 一条 `rg` 就行 | n/a |
 | 改的是什么 | surface（发给模型的东西） | surface（发给模型的东西） | **显示**（长消息在界面上折起来看） |
-| 触发线 | `thresholdRatio × contextWindow`，默认 80 万 | `triggerRatio × contextWindow`（0.75 ⇒ 75 万），压在官方那条线下；写了绝对 `triggerSurfaceTokens` 仍然优先 | n/a |
+| 触发线 | `thresholdRatio × contextWindow`，默认 80 万 | `triggerSurfaceTokens`（或 `triggerRatio × contextWindow`），**按真实 prompt 校准** —— 中文重的 100 万窗口用 300000；写了绝对 `triggerSurfaceTokens` 就优先于比例 | n/a |
+
+> **要压在官方那条线下 —— 是「真实 token」的线下，不是计量器数字的线下。**
+> 官方 `dsh-compaction-basic` 在 `thresholdRatio × contextWindow` 触发（默认 `0.8 × 100 万` =
+> 80 万），保留 `0.16 × 窗口`（16 万）✓ 它的替代品是模型写的摘要，有损 ✓
+> 先折就是为了让那个摘要器永远不触发 ✓ 坑在于：DSH 的 `surfaceTokens` 对中文会少报约 1.75 倍，
+> 所以「计量器口径的 0.75 倍窗口」其实是「真实口径的 1.31 倍窗口」，一辈子到不了 ✗
+> 先按上一节把比例量出来，再定数字 ✓
 
 名字里带 `fold` 的插件，很多是**界面折叠**：把一条长消息在 UI 里折起来方便看，
 **请求体一个字节都不动** ✓ 本插件恰好相反 —— 完全不碰界面，
@@ -344,6 +375,11 @@ The one-line index below is extractive, not a rewritten summary ...
 - `idle` —— 没到触发线
 - `no-safe-cut` —— 到了线但找不到安全切点，或折得太少
 - `no-meter` —— 看不到计量器，拒绝盲折
+- `threshold-warning` —— 解析出来的阈值不可能有效折叠（见上）；**每组不同的解析结果只写一条**，
+  不是每轮一条
+- `warnings`（`profile` 行上的字段）—— `trigger-behind-native-compaction`（≥ `0.8 × 窗口`，
+  官方压缩必先到）、`trigger-at-or-above-window`（压根够不着）、`target-not-below-trigger`
+  （永远没得折）✓ 窗口解析不出来时**不写窗口相关的告警**，而不是猜一个 ✗
 - `would-fold` —— dry-run 下「本来会折多少、从哪到哪、省百分之几」
 - `folding` / `folded` —— 真折了（两行都带 `surfaceTokens` / `foldTokens` / `startSeq` / `endSeq`）
 - `archive-failed` —— 归档写不进去 ⇒ 这次不折
@@ -480,6 +516,8 @@ npm run test:mutate # 故意塞回 10 个真实缺陷，要求每套都变红
   `triggerSource:"ratio"` / `via:"ctx.reflect.get|llm:ctx.reflect.get/agent.options"`
   —— 也就是说它走的是 `ctx.reflect.get` 拿到 `llm`、再从 `agent.options` 取 provider/model ✓
   取值方式与 `resolveMeter()` 一致（先直接属性，再 `ctx.reflect.get`，再 `agent.ctx`），全程不抛错 ✓
+  ⚠️ 那次输出里的 `0.75` / `0.18` 是**当时的默认值**，正是 0.8.2 换掉的那个「三周没折」的值 ✗
+  机制（比例能生效、取值路通）没变，只有数字换了 ✓
   万一你的 build 三条路都不通，日志里会是 `triggerSource: "default"`，
   行为与加这个功能之前完全一致 ✓
 - 折叠确实减少了模型能看到的东西 ✓ 归档保证可找回，但**不是没代价**：

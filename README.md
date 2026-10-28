@@ -131,7 +131,7 @@ contextWindow`, or an explicit absolute `triggerSurfaceTokens`, see
 
 1. Picks the oldest run of nodes that ends on a tool-pairing **balanced** cut, leaves at
    least `keepRecentNodes` behind, and brings the surface down to about the target
-   (`targetRatio × contextWindow`, default `0.18`).
+   (`targetRatio × contextWindow`, default `0.14`).
 2. **Archives** every folded node, verbatim, to
    `$DSH_HOME/history-fold/archive/<session>.jsonl`. If this write fails the fold is
    abandoned — history is never dropped without a copy on disk first.
@@ -243,7 +243,7 @@ dsh plugin add --profile web github:mili1360/dsh-history-fold
 Prefer a pinned, immutable artifact? Every release ships its tarball, no registry involved:
 
 ```bash
-dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.1/dsh-history-fold-0.8.1.tgz
+dsh plugin add --profile web https://github.com/mili1360/dsh-history-fold/releases/download/v0.8.2/dsh-history-fold-0.8.2.tgz
 ```
 
 That resolves the package over git, adds it to the profile's `dependencies`, and registers
@@ -285,10 +285,9 @@ plugin uses.
 2. **Restart DSH.** Plugin rows load at boot.
 
 3. **It is already on.** The shipped defaults fold for real — but only above `triggerRatio`
-   (0.75 of the model's context window), which sits just below the built-in compactor's 0.8, and
-   every folded node is archived verbatim before it leaves the visible history. Installing it
-   therefore does not leave the request untouched: it profiles from the first turn and folds once
-   a window is 75% full.
+   (default 0.33 of the model's context window, deliberately early: that ratio multiplies DSH's
+   meter, which under-reports the real prompt; see the calibration section below), and
+   every folded node is archived verbatim before it leaves the visible history.
 
    To watch it without letting it write anything, create
    `~/.dsh/dsh-history-fold/config.json`:
@@ -375,12 +374,12 @@ every turn**, so edits apply without a restart.
 | `enabled` | `true` | Master switch. `false` ⇒ loaded but completely idle. |
 | `dryRun` | `false` | `true` ⇒ observe and log only, never write. |
 | `profile` | `true` | Write one size/profile line per turn. |
-| `triggerSurfaceTokens` | `250000` | Absolute trigger, as a fallback — see the resolution order below. Explicit here ⇒ wins. |
-| `targetSurfaceTokens` | `180000` | Absolute target, as a fallback. Explicit here ⇒ wins. Must be reachable — see below. |
-| `triggerRatio` | `0.75` | Fold only above this fraction of the model's context window. Scales with the window; used whenever the window resolves and no absolute key is set. |
-| `targetRatio` | `0.18` | Fold down to about this fraction of the window. |
-| `emergencyTriggerRatio` | `0.8` | Second chance. Still at or above this fraction of the window at the next turn ⇒ the normal attempt did not land, so retry with the relaxed limits below. |
-| `emergencyTriggerSurfaceTokens` | `800000` | Absolute form of the second chance, used when the window cannot be resolved. Never allowed below the normal trigger. |
+| `triggerSurfaceTokens` | `250000` | Absolute trigger, used when the context window cannot be resolved. Explicit here ⇒ wins over the ratio. See the calibration section below before setting this on Chinese-heavy history. |
+| `targetSurfaceTokens` | `180000` | Absolute target, same fallback role. Must be reachable — see below. |
+| `triggerRatio` | `0.33` | Fold only above this fraction of the model's context window. Applied to DSH's meter, which under-reports real prompts (measured ~1.75x on Chinese), so this is deliberately below the compactor's 0.8 line — see the calibration section. |
+| `targetRatio` | `0.14` | Fold down to about this fraction of the window — below the compactor's own 0.16 retain ratio. |
+| `emergencyTriggerRatio` | `0.42` | Second chance. Still at or above this fraction of the window at the next turn ⇒ the normal attempt did not land, so retry with the relaxed limits below. |
+| `emergencyTriggerSurfaceTokens` | `320000` | Absolute form of the second chance, used when the window cannot be resolved. Never allowed below the normal trigger. |
 | `emergencyKeepRecentNodes` | `12` | How much recent history the retry is still allowed to protect (the smaller of this and `keepRecentNodes` wins). |
 | `emergencyMinFoldNodes` | `4` | Retry floor on node count. |
 | `emergencyMinFoldTokens` | `2000` | Retry floor on folded tokens. |
@@ -495,21 +494,48 @@ The ratio is what scales. A fixed 250000 can never be reached on a 128k-window m
 plugin silently does nothing there; on a 1M window it is only a quarter of capacity, so the
 compactor gets there first.
 
-**Verified on a real DSH instance** (2026-10-12, `web` profile, a 1M-window model): with a
-config that carries no absolute key, a turn logged `windowTokens:1000000`, `trigger:750000`,
+**Verified on a real DSH instance** (2026-10-12, `web` profile, a 1M-window model; the default
+ratio was `0.75` at the time, which is exactly the value 0.8.2 replaced after it failed to fold
+for three weeks): with a config that carries no absolute key, a turn logged `windowTokens:1000000`,
+`trigger:750000`,
 `target:180000`, `triggerSource:"ratio"` and
 `via:"ctx.reflect.get|llm:ctx.reflect.get/agent.options"` — so `llm` was reached through
 `ctx.reflect.get` and the provider/model came from `agent.options`. If none of the three lookup
 paths work in your build, the line says `triggerSource: "default"` and the behaviour is exactly
 what it was before this feature existed.
 
-**Why `0.75` / `0.18`, and keep the trigger just under the compactor's line.**
-`dsh-compaction-basic` fires at `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k —
-and retains `0.16 × window` (160k). Its replacement is a **model-written summary**, which is
-lossy. `0.75` (750k of a 1M window) folds just *below* that line, which is what stops the
-summarizer from ever firing; `0.18` (180k) mirrors its 0.16 retain ratio. Both defaults are
-this project's own absolute settings — 750k and 180k, i.e. `0.75` and `0.18` of a
-1,000,000-token window — expressed as fractions so they survive a change of window.
+**Calibrate the trigger against the real prompt, not against the number.** `surfaceTokens` is
+DSH's own meter, and on Chinese-heavy history it under-reports what the provider actually bills by
+a measured factor: on one real session, `surfaceTokens: 452,024` while the API request carried
+**790,915** tokens (`cacheReadTokens + inputTokens`), a ratio of **1.737–1.769 across 35
+consecutive turns**. A threshold that looks safely below the compactor's line in meter units can
+therefore be far above it in real tokens.
+
+That is not hypothetical. This plugin ran `triggerSurfaceTokens: 750000` against a 1,000,000-token
+window for three weeks and never folded once:
+
+| what the config looked like | what it meant |
+|---|---|
+| 750000 "of a 1M window", i.e. 0.75 | 1.31M **real** tokens — above the window itself |
+| trigger 750000 vs. compactor at 800000 | unreachable: the compactor always fired first and rewrote the history into a model-written summary |
+| the log | `idle`, `"surfaceTokens": 452024`, `"trigger": 750000` — reading, correctly, as "not needed yet" |
+
+So: measure your own ratio before choosing a number.
+
+1. Take one `profile` line's `surfaceTokens` from `$DSH_HOME/logs/history-fold.jsonl`.
+2. Take the same turn's `cacheReadTokens + inputTokens` from `$DSH_HOME/logs/vitals/vitals-*.jsonl`.
+3. Divide. Keep `triggerSurfaceTokens` low enough that `trigger × ratio` stays comfortably under
+   `0.8 × contextWindow`.
+
+On the 1M-window, Chinese-heavy session this project is developed against, that ratio is ~1.75, so
+the working set is **`triggerSurfaceTokens: 300000` / `targetSurfaceTokens: 130000`** — ~528k real
+tokens (52.8% of the window) to fold, ~234k real tokens kept. That leaves ~272k real tokens of
+margin before the compactor's 800k line.
+
+**Since 0.8.2 the plugin checks this for you.** A trigger at or above `0.8 × window`, or at or
+above the window itself, or a target at or above the trigger, writes one `threshold-warning` line
+per distinct resolved pair — so the next misconfiguration is one grep away instead of three weeks
+away.
 
 Every profile and fold line reports what happened: `windowTokens` (the resolved window, or
 `null`), and `triggerSource` / `targetSource` = `absolute` | `ratio` | `default`. A ratio
@@ -526,13 +552,15 @@ threshold: it falls back to rule 3 and the line also carries `triggerRatioInvali
 | Is anything invented | yes, the model writes new prose | no, the index lines are the messages' own prefixes, and no model is called | n/a |
 | Recoverable | no | yes, one `rg` over the archive | n/a |
 | What it changes | the surface (what the model is sent) | the surface (what the model is sent) | the **display** (long messages collapsed in the UI) |
-| Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerRatio × contextWindow` (0.75 ⇒ 750k), just below the compactor's line; an absolute `triggerSurfaceTokens` still overrides it | n/a |
+| Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerSurfaceTokens` (or `triggerRatio × contextWindow`), calibrated against the **real** prompt size — 300000 on a Chinese-heavy 1M session; an absolute `triggerSurfaceTokens` still overrides the ratio | n/a |
 
-> **Keep the trigger below the compactor's line.** `dsh-compaction-basic` fires at
-> `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k — and keeps `0.16 × window`
-> (160k). Its replacement is a model-written summary, which is lossy. Folding first is what
-> stops that summarizer from ever firing at all. This is exactly why the default is
-> `triggerRatio: 0.75` and not `0.8`: it scales with the window and still sits under the line.
+> **Keep the trigger below the compactor's line — in real tokens, not in meter units.**
+> `dsh-compaction-basic` fires at `thresholdRatio × contextWindow` — `0.8 × 1,000,000`, so 800k —
+> and keeps `0.16 × window` (160k). Its replacement is a model-written summary, which is lossy.
+> Folding first is what stops that summarizer from ever firing at all. The trap is that DSH's
+> `surfaceTokens` can under-report the real request by ~1.75x on Chinese text, so a trigger of
+> `0.75 × window` in *meter* units is ~1.31 × window in *real* units and never fires. Measure the
+> ratio (previous section), then pick the number.
 
 A plugin with `fold` in its name is often a **display** fold: it collapses a long message in
 the UI so it is easier to read, and leaves the request payload exactly as it was. This plugin
@@ -556,6 +584,7 @@ fragments are never removed — see
 | `folding` / `folded` | A real fold started / committed. Both carry `surfaceTokens`, `foldTokens`, `startSeq`, `endSeq`. |
 | `no-safe-cut` | No balanced cut reaches the target, or the minimums were not met. |
 | `no-meter` | The token meter was unreachable, so it refused to fold blind. |
+| `threshold-warning` | The resolved thresholds cannot fold anything usefully — see below. Written once per distinct resolved pair, never once per turn. |
 | `archive-failed` | The archive write failed, so the fold was abandoned. |
 | `error` | Anything else. The hook always fails open — a turn is never blocked. |
 | `fed` | The digest was posted to the memory service (`memoryFeed`). |
@@ -569,6 +598,7 @@ of the three paths ran:
 | `windowTokens` | The resolved context window, or `null` when it could not be established. |
 | `triggerSource` / `targetSource` | `absolute` (explicit in `config.json`), `ratio` (`floor(window × ratio)`), or `default` (the shipped absolute fallback). |
 | `triggerRatioInvalid` / `targetRatioInvalid` | Present and `true` only when the configured ratio was unusable and rule 3 was applied instead. |
+| `warnings` | On a `profile` line: which unreachable-threshold conditions hold. Values: `trigger-behind-native-compaction` (at or above `0.8 × window`, so DSH's own compactor always gets there first), `trigger-at-or-above-window` (unreachable outright), `target-not-below-trigger` (nothing can ever be folded). An unresolved window produces no window-relative warning rather than a guessed one. |
 | `via` | Which path reached the token meter, and which reached `llm` (e.g. `ctx.tokenMeter|llm:ctx.reflect.get/agent.options`). |
 
 ## Safety model
