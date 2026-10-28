@@ -48,6 +48,7 @@ jobs:
       # 在 Ubuntu runner 上跑会假失败，反而挡住发布）。
       - name: test
         run: |
+          node test/diagnose-recalls.mjs
           node test/recall-tests.mjs
           node test/rare-tests.mjs
           node test/notes-tests.mjs
