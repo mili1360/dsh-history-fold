@@ -30,16 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **A small classifier decides whether a plain question deserves a lookup** (`lib/gate.js` +
-  `model/gate-model.json`, 856 kB, pure JS, zero dependencies). It does not replace the rules — it
-  filters their false positives: the identifier/intent-keyword rule fired on **20.4% of real
-  conversational turns** (73/358 in 400 hand-labelled samples); the classifier brings that to
-  **13.4% (48/358)** while keeping essentially all true positives (23→22). On 20 questions that
-  genuinely need the archive it admits **14/20** vs the rule's 7/20.
+  `model/gate-model.json`, 1.3 MB, pure JS, zero dependencies). It does not replace the rules — it
+  filters their false positives. Measured over **659 hand-labelled real conversational turns**
+  (13.2% positive), the identifier/intent-keyword rule admits 56% of the turns that genuinely need
+  the archive but also fires on **22.0% of the turns that do not** (126/572). With the classifier
+  in front of it: **59% admitted** (51/87) and **7.5% false fire** (43/572) — both numbers improve,
+  which is the whole point (a filter that only trades recall for precision would be useless here).
   - Input is one sentence; features are character 1-3 grams; logistic regression. Inference is
     sub-millisecond. If the model file is missing or unreadable the layer is skipped silently and
     the rules still apply — no blind switch to open.
-  - Tuned on 400 hand-labelled real turns (10.5% positive) plus 75 synthetic technical-query
-    samples. Threshold `recall.gateThreshold` defaults to 0.45.
+  - Trained on 659 hand-labelled turns (400 stratified + 259 chosen by active learning for being
+    near the decision boundary) plus 75 synthetic technical-query samples. Threshold
+    `recall.gateThreshold` defaults to **0.50**.
+  - The last 259 labels came from `active-select.py`: score the 3,031 unlabelled turns, label only
+    those the current model was least sure about. Auditing the corpus first mattered — there were
+    4,906 user messages decaying in the logs while the first model was trained on 400 of them.
 - **`recall-injected` now records `q` and `paths`.** `q` is the user's actual question (first 60
   chars); `paths` are the note files that were hit (last 60 chars each, notes only, deduped, max 3).
   This is the raw material for training on real usage later — a task the current model cannot do
@@ -621,4 +626,5 @@ against a real 608-message fold.
   dropped tool-pairing balance requirement — and fails unless the suite catches every one.
   Current result: **6 / 6 caught**. A green suite on its own proves nothing; this is what
   makes the green meaningful.
+
 
