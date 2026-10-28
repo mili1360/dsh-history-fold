@@ -5,6 +5,54 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-28
+
+### Changed
+
+- **Note scoring is now TF-IDF weighted instead of raw hit counts.** `searchNotes()` used to rank a
+  file by `Σ occurrences`, which handed long files and 2-gram fragments the win: `的卡`, `个学`
+  appear dozens of times in a long day file, while a decisive rare name like `瓦特` or `00381` got
+  the same weight as a fragment. Now:
+
+  ```
+  score = Σ (1 + log(hits)) × idf(term) × (title hit ? titleWeight : 1)
+  ```
+
+  Measured on 20 real questions, through this plugin's **own** `extractKeywords` + `searchNotes`
+  (not a re-implementation): **top1 2→5, top3 7→12, top5 11→15**.
+
+- **`recall.strict` no longer means "silently do nothing".** Under strict mode a message without an
+  identifier used to `return next()` immediately — the log showed 192 skips against 590 injections,
+  i.e. roughly a third of questions never woke retrieval at all. "No rare term found" now falls
+  through to the broad path instead of ending the turn. Set `recall.fallback: false` for the old
+  behaviour.
+
+### Added
+
+- **A small classifier decides whether a plain question deserves a lookup** (`lib/gate.js` +
+  `model/gate-model.json`, 856 kB, pure JS, zero dependencies). It does not replace the rules — it
+  filters their false positives: the identifier/intent-keyword rule fired on **20.4% of real
+  conversational turns** (73/358 in 400 hand-labelled samples); the classifier brings that to
+  **13.4% (48/358)** while keeping essentially all true positives (23→22). On 20 questions that
+  genuinely need the archive it admits **14/20** vs the rule's 7/20.
+  - Input is one sentence; features are character 1-3 grams; logistic regression. Inference is
+    sub-millisecond. If the model file is missing or unreadable the layer is skipped silently and
+    the rules still apply — no blind switch to open.
+  - Tuned on 400 hand-labelled real turns (10.5% positive) plus 75 synthetic technical-query
+    samples. Threshold `recall.gateThreshold` defaults to 0.45.
+- **`recall-injected` now records `q` and `paths`.** `q` is the user's actual question (first 60
+  chars); `paths` are the note files that were hit (last 60 chars each, notes only, deduped, max 3).
+  This is the raw material for training on real usage later — a task the current model cannot do
+  because its training data has no "same thing asked differently" pairs.
+
+### Fixed
+
+- `searchNotes` no longer lets one archive `.jsonl` occupy every hit slot when notes are present;
+  the training-data log only records `.md`.
+- A flaky test: `notes cache: a rewritten note is re-read` failed about one run in three when the
+  rewrite kept the byte length (NTFS mtime resolution cannot separate two writes in the same
+  millisecond). The fixture now changes the size too.
+
 ## [0.7.1] - 2026-10-26
 
 ### Added

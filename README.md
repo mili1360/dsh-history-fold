@@ -318,7 +318,12 @@ every turn**, so edits apply without a restart.
 | `notes.minEventScore` | `3` | Strictness of the ledger. Raise to 4 for fewer, cleaner lines. |
 | `notes.startDelayMs` | `45000` | First pass waits this long so boot is never slowed. |
 | `notes.maxLogMB` | `600` | Safety valve: a bigger log is skipped rather than read into the heap. |
-| `recall.strict` | `false` | `true` ⇒ if the precise layer (entity map / rare identifiers) finds nothing, inject nothing. `false` ⇒ fall back to the keyword/embedding paths as before. |
+| `recall.strict` | `false` | `true` ⇒ the precise layer (entity map / rare identifiers) is tried first. **Since 0.8.0 this no longer ends the turn when it finds nothing** — it falls back to the broad path. Set `recall.fallback: false` for the pre-0.8 “inject nothing” behaviour. |
+| `recall.fallback` | `true` | `false` ⇒ a strict-mode miss injects nothing (old behaviour). |
+| `recall.fallbackMinChars` | `12` | A message shorter than this only falls back when it carries recall intent (see `recall.gateThreshold`). |
+| `recall.gateThreshold` | `0.45` | Confidence the bundled classifier must reach for a plain question to proceed. Lower ⇒ more lookups and more noise; `0` disables the filter. The model is `model/gate-model.json`; if it is missing the layer is skipped and rules apply unchanged. |
+| `recall.gateModel` | *(bundled)* | Override the classifier path. |
+| `recall.titleWeight` | `2` | Multiplier when a matched term also appears in a `##` heading. |
 | `recall.entityMapFile` | `dsh-history-fold/entity-map.json` | JSON table of `{key, file, line, title}`. A key that appears in the user's message serves that exact location, no scoring. Edit the file to teach it a topic. |
 | `recall.rareMaxDf` | `2` | A rare identifier must appear in at most this many note files to be used as a locator. |
 | `recall.entityMapAutoFile` | `dsh-history-fold/entity-map.auto.json` | The **auto-built** table. Rebuilt from the notes, never hand-edited. |

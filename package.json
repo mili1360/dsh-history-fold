@@ -1,6 +1,6 @@
 {
   "name": "dsh-history-fold",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Fold the oldest part of a DSH session's surface history into one message that points at a lossless local archive, so a long session stops paying for its whole history on every request.",
   "keywords": [
     "dsh-plugin",
@@ -33,9 +33,11 @@
   },
   "files": [
     "lib",
+    "model",
     "test",
     "cordis.patch.yml",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "README.md"
   ],
   "engines": {
     "node": ">=18",

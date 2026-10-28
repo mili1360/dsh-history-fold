@@ -1,4 +1,4 @@
-﻿// Tests for the recall module inside dsh-history-fold.
+// Tests for the recall module inside dsh-history-fold.
 //
 // The recall module greps the live session's own archive (and optionally a notes dir) for the
 // keywords in the current turn. What matters here is not "does it find text" but:
@@ -59,12 +59,23 @@ function run(session, cfg, step = 1) {
     plugin.apply(ctx)
     assert.ok(handlers.length >= 1, 'apply must register the fold listener at least')
     const sent = []
-    const agent = { session, inject: (m) => sent.push(['inject', m]), steer: (m) => sent.push(['steer', m]) }
-    const payload = { agent, step, turn: 3 }
-    const next = async () => {}
+    const agent = { session }
+    // The batch the step is entering: one user message. Newer recall prepends its context to this
+    // list instead of calling agent.inject(), because an injected message lands AFTER the prompt
+    // and then gets answered as if the user had said it (2026-10-27).
+    const userMsg = { id: 'user-1', role: 'user', content: [{ type: 'text', text: (session.__text || (session.events[0] && session.events[0].data.content[0].text) || 'hi') }], source: { kind: 'user' } }
+    const payload = { agent, step, turn: 3, messages: [userMsg] }
+    const next = async () => ({ kind: 'enter', messages: [userMsg] })
     return handlers
-        .reduce((p, h) => p.then(() => h(payload, next)), Promise.resolve())
-        .then(() => sent)
+        .reduce((p, h) => p.then((acc) => h(payload, next).then((out) => out || acc)), Promise.resolve(null))
+        .then((decision) => {
+            const msgs = decision && Array.isArray(decision.messages) ? decision.messages : []
+            for (const m of msgs) {
+                if (m && m.source && m.source.kind === 'plugin') sent.push(['inject', m])
+            }
+            sent.__order = msgs.map((m) => (m && m.source && m.source.kind) || '?')
+            return sent
+        })
 }
 
 // ---------------------------------------------------------------- keywords
@@ -149,7 +160,8 @@ await test('formatBlock: respects maxChars, and returns empty with no hits', () 
     const hits = Array.from({ length: 10 }, (_, i) => ({ source: 's' + i, path: '/p', snippet: 'x'.repeat(200) }))
     const block = formatBlock(hits, { maxChars: 600 })
     assert.ok(block.length <= 600, 'block inside budget: ' + block.length)
-    assert.ok(block.includes('路径: /p'))
+    // The compact format is one header line plus "· path — snippet"; the path must be present.
+    assert.ok(block.includes('/p'), 'the block carries each hit path')
 })
 
 // ---------------------------------------------------------------- the hook
@@ -168,7 +180,7 @@ await test('hook: injects one steer when the session archive has a hit', async (
     assert.equal(sent[0][0], 'inject', 'inject() is preferred over steer()')
     const text = sent[0][1].content[0].text
     assert.ok(text.includes('750k'))
-    assert.ok(text.includes('路径:'), 'the snippet carries its source path')
+    assert.ok(text.includes('.jsonl'), 'the snippet carries its source path')
     assert.equal(sent[0][1].source.kind, 'plugin', 'must not pretend to be the user')
 })
 
@@ -195,6 +207,58 @@ await test('hook: dryRun logs the intent and steers nothing', async () => {
     assert.equal(sent.length, 0)
     const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
     assert.ok(log.includes('recall-would-inject'))
+})
+
+await test('hook: recall-injected records the real query and hit paths', async () => {
+    // 这条日志是将来训练数据的唯一来源：真实的问话 + 当时召回了哪几节。
+    // 没有它就只能继续用"标题原文"当监督，而那已经证明学不到"换个说法"。
+    seedArchive('session-r1', 'history-fold 触发线 750k')
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
+        enabled: true, recall: { enabled: true, minIntervalMs: 0 },
+    })
+    assert.ok(sent.length >= 1, 'expected an injected message')
+    const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
+    const line = log.split('\n').filter((l) => l.includes('recall-injected')).pop()
+    assert.ok(line, 'expected a recall-injected line')
+    assert.ok(line.includes('"q":'), 'query not recorded')
+    assert.ok(line.includes('"paths":'), 'hit paths not recorded')
+})
+
+await test('hook: strict no longer swallows a plain question (falls back)', async () => {
+    // 2026-10-27 的决定：strict 曾经意味着"话里没有标识符就什么都不查"，日志里
+    // 192 次 skip 对 590 次注入 —— 而同一批评测显示泛问题用词面 top-5 能覆盖 65~80%。
+    // 所以「没找到专名」现在是退到大众路径，不是终点。
+    seedArchive('session-r1', 'history-fold 触发线 750k')
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
+        enabled: true, recall: { enabled: true, minIntervalMs: 0, strict: true },
+    })
+    assert.ok(sent.length >= 1, 'plain question should still recall under strict')
+    const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
+    assert.ok(log.includes('recall-fallback'), 'expected a recall-fallback line')
+})
+
+await test('hook: fallback:false restores the old strict skip, and the skip carries q', async () => {
+    seedArchive('session-r1', 'history-fold 触发线 750k')
+    const sent = await run(makeSession('session-r1', ['history-fold 触发线']), {
+        enabled: true, recall: { enabled: true, minIntervalMs: 0, strict: true, fallback: false },
+    })
+    assert.equal(sent.length, 0)
+    const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
+    const line = log.split('\n').filter((l) => l.includes('strict-no-rare')).pop()
+    assert.ok(line, 'expected a strict skip')
+    assert.ok(line.includes('"q":'), 'skip should record the question too')
+})
+
+await test('hook: a short meta question is gated out of the fallback', async () => {
+    // 实测（2026-10-27，活体）：「要怎么问呢」5 个字召回了 4 条旧账，全是噪声。
+    // 档案里故意放着这句话 —— 没有门槛它一定会命中，所以这条测的是门槛本身。
+    seedArchive('session-r1', '要怎么问呢 要怎么问 元问题')
+    const sent = await run(makeSession('session-r1', ['要怎么问呢']), {
+        enabled: true, recall: { enabled: true, minIntervalMs: 0, strict: true },
+    })
+    assert.equal(sent.length, 0, 'a 5-char meta question must not recall')
+    const log = fs.readFileSync(path.join(tmp, 'logs', 'history-fold.jsonl'), 'utf8')
+    assert.ok(log.includes('fallback-gate'), 'the gate should say why it skipped')
 })
 
 await test('hook: a step other than the first is ignored', async () => {
@@ -240,8 +304,9 @@ await test('notes cache: a rewritten note is re-read, not served stale', () => {
     const first = searchNotes(dir, ['alpha'], { maxNoteHits: 2, snippetChars: 80 })
     assert.equal(first.length, 1)
     assert.equal(plugin.noteCacheSize(), 1)
-    // Same size, different bytes: the guard must be mtime-or-size, and mtime moves on Windows here.
-    fs.writeFileSync(file, '新内容 alpha', 'utf8')
+    // 让 size 也跟着变：NTFS 的 mtime 精度不足以区分"同一毫秒内的两次写"，
+    // 只改字节不改大小时这条测试会偶发失败（实测三次里一次 FAIL）。
+    fs.writeFileSync(file, '新内容 alpha 这次写得更长一些', 'utf8')
     const second = searchNotes(dir, ['alpha'], { maxNoteHits: 2, snippetChars: 80 })
     assert.equal(second.length, 1)
     assert.ok(second[0].snippet.includes('新内容'), 'stale note served: ' + second[0].snippet)
