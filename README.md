@@ -4,6 +4,8 @@
 [![deepseek-harness](https://img.shields.io/badge/deepseek--harness-plugin-4b6bfb)](https://github.com/topics/deepseek-harness)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+**中文说明：[README.zh-CN.md](README.zh-CN.md)** — 完整对照，含 0.8.0 分类器的实测数据
+
 > **Topics:** `dsh` · `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
 > `context-compaction` · `non-summary` · `recoverable` · `extractive-index`
 
