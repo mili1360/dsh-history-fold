@@ -17,6 +17,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Actually publish to npm (leave unchecked to only run tests)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -55,8 +60,9 @@ jobs:
           npm pack --dry-run
 
   publish:
-    # Only on a manual run — a tag must not require registry credentials.
-    if: github.event_name == 'workflow_dispatch'
+    # Only when explicitly asked: a tag must never require registry credentials, and a stray
+    # manual run must not publish by accident.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: verify
     runs-on: ubuntu-latest
     steps:

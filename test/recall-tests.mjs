@@ -49,7 +49,10 @@ function makeSession(id, texts) {
 
 // Fires every registered agent/pre-step handler, the way the host does.
 function run(session, cfg, step = 1) {
-    writeConfig(cfg)
+    // gate 默认关掉：单元测试要测的是决策逻辑，不该随 model/gate-model.json 的内容变化。
+    // （0.8.0 的 CI 就这么在 Linux 上挂了一个测试——模型加载成功，但判断与本地不同。）
+    // gate 自己有专门的测试，见文件末尾。
+    writeConfig({ ...cfg, recall: { gate: false, ...(cfg.recall || {}) } })
     const handlers = []
     const ctx = {
         get tokenMeter() { return undefined },
@@ -374,6 +377,26 @@ await test('crossSession: off reads only this window, on reads every window', as
   assert.ok(!JSON.stringify(off).includes('zetaquux 这个暗号'), 'isolation leaked with crossSession off')
   const on = await run(mk(), { enabled: true, recall: { enabled: true, minIntervalMs: 0, notesDir: notesBase, crossSession: true, maxChars: 3000 } })
   assert.ok(JSON.stringify(on).includes('zetaquux 这个暗号'), 'crossSession did not reach the other window')
+})
+
+// ---------------------------------------------------------------- gate（分类器）单独测
+// 它测的是"模型文件能不能加载、分数是不是可用"，不测召回逻辑——所以不经过 run() 的 gate:false。
+await test('gate: the bundled model loads and separates obvious cases', async () => {
+    const { makeGate } = await import('../lib/gate.js')
+    const g = makeGate()
+    assert.equal(g.available, true, 'model/gate-model.json should ship with the package')
+    // 明确的回忆意图要给高分，明显的当下问题/寒暄要给低分
+    assert.ok(g.prob('我们之前选过哪个模型来做检索') > 0.6, 'recall intent should score high')
+    assert.ok(g.prob('现在跑到第几步了') < 0.4, 'status question should score low')
+    assert.ok(g.prob('要怎么问呢') < 0.4, 'meta question should score low')
+})
+
+await test('gate: a missing model file degrades to "no opinion"', async () => {
+    const { makeGate } = await import('../lib/gate.js')
+    const g = makeGate({ modelFile: path.join(tmp, 'no-such-model.json') })
+    assert.equal(g.available, false)
+    assert.equal(g.allow('随便一句话'), true, 'without a model the rules must decide')
+    assert.equal(g.prob('随便一句话'), null)
 })
 
 fs.rmSync(tmp, { recursive: true, force: true })
