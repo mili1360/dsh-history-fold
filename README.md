@@ -6,18 +6,31 @@
 
 **中文说明：[README.zh-CN.md](README.zh-CN.md)** — 完整对照，含 0.8.0 分类器的实测数据
 
-> **Topics:** `dsh` · `dsh-plugin` · `deepseek-harness` · `history-fold` · `lossless-archive` ·
-> `context-compaction` · `non-summary` · `recoverable` · `extractive-index`
+> **Topics:** `dsh` · `dsh-plugin` · `deepseek-harness` · `persistent-memory` ·
+> `long-term-memory` · `memory-recall` · `history-fold` · `lossless-archive` ·
+> `extractive-index` · `recoverable` · `non-summary`
 
-**Is a long DSH session costing you more on every single turn — and getting slower while it
-does?**
+**Your assistant remembers yesterday — right up until the context fills up.**
 
-Every request re-sends the whole visible history, and a context window is billed by the token.
-A conversation a few hundred turns deep pays for all of them, every time, whether or not any of
-it is still relevant.
+Every conversation that runs long enough hits the same wall: the history no longer fits, so
+something has to be dropped. The built-in compactor drops it by *summarising*, and a summary of
+eleven hours of work is not the parameter you needed, the path you saved, or the decision you
+actually made. Ask about it two days later and you get a confident paraphrase of a memory nobody
+kept.
 
-This plugin folds the **oldest** part of that visible history into a single message backed by a
-**lossless local archive** — the request gets smaller, and nothing is thrown away.
+This plugin keeps the whole thing instead. The oldest span of history becomes **one message that
+carries an extractive index** — real prefixes of the real messages, nothing paraphrased, no model
+called — and every folded message is written **verbatim to a local archive first**. The visible
+context gets short; the history does not disappear.
+
+It is memory, not bookkeeping:
+
+- **Nothing is ever dropped without a copy on disk.** Archive first, fold second; if the write
+  fails the fold is abandoned.
+- **Nothing is summarised.** The lines in the index are the messages' own prefixes, so what the
+  model sees is quoted evidence, not a rewrite.
+- **The notes are regenerable from your session logs** — delete them entirely and the next refresh
+  mines them back. Measured below.
 
 - **Inert by default.** A fresh install reads nothing, writes nothing and logs nothing
   until you configure it.
@@ -88,20 +101,27 @@ the note files it hit — the raw material for training on real usage later.
 
 ---
 
-## Why
+## Why a summary is the wrong answer
 
-Measured on one machine, a long session against a fresh one:
+A long DSH session on one machine, for scale:
 
-| | long session | fresh session |
+| | a long session | a fresh one |
 |---|---|---|
-| history tokens | 497,141 | small |
-| output / input ratio | 0.20% | 0.64% |
-| decode speed | 59 tok/s | 176 tok/s |
-| time to first token | ~2.5 s | ~2.5 s |
+| history sitting in the window | 497,141 tokens | a few thousand |
+| what the built-in compactor leaves behind | a summary, written by a model | — |
+| can you still quote the original line? | **no** | yes |
 
-So context length does **not** slow the first token; it slows **decode**, because attention
-runs over the whole KV cache. Shrinking the visible history is what brings the decode rate
-back.
+Once that history is summarised, three things are gone permanently: the exact text, the ordering,
+and the ability to check. You cannot `rg` a paraphrase. Ask "what did we set the threshold to, and
+why" a week later and the honest answer is a plausible guess.
+
+This plugin takes the other option — **keep everything, shrink only the window**. Folded messages
+are archived verbatim, so the answer to "what exactly did we say" is a file search away, and the
+message that replaced them quotes real prefixes instead of inventing a narrative.
+
+That the request also gets shorter is a side effect, not the pitch: a shorter context is what keeps
+a long conversation usable at all, and it is why the fold has to happen. What the plugin refuses to
+do is make the fold *lossy*.
 
 ## What it does
 
@@ -502,9 +522,9 @@ threshold: it falls back to rule 3 and the line also carries `triggerRatioInvali
 | | built-in `dsh-compaction-basic` | this plugin | UI-fold plugins |
 |---|---|---|---|
 | What replaces the history | a **model-written summary** | an **extractive index** + an archive pointer | nothing — the request is untouched |
-| Cost per fold | one extra model call | none, no model call at all | none |
-| Is the original kept | no — the summary is all that survives | yes, verbatim, in `$DSH_HOME/history-fold/archive/` | n/a |
-| Recoverable | no | yes, with one `rg` over the archive | n/a |
+| **Can you still quote the original** | **no** — the summary is all that survives | **yes**, verbatim, in `$DSH_HOME/history-fold/archive/` | n/a |
+| Is anything invented | yes, the model writes new prose | no, the index lines are the messages' own prefixes, and no model is called | n/a |
+| Recoverable | no | yes, one `rg` over the archive | n/a |
 | What it changes | the surface (what the model is sent) | the surface (what the model is sent) | the **display** (long messages collapsed in the UI) |
 | Trigger | `thresholdRatio × contextWindow`, 800k by default | `triggerRatio × contextWindow` (0.75 ⇒ 750k), just below the compactor's line; an absolute `triggerSurfaceTokens` still overrides it | n/a |
 
@@ -643,13 +663,13 @@ Two limits worth knowing:
 
 ## Related plugins
 
-Three small DSH plugins, each aimed at one part of the same problem — a session that gets
-expensive and slow the longer it runs:
+Three small DSH plugins, each aimed at one part of the same problem — an agent that has to keep
+working past the point where a single context window runs out, without forgetting what happened:
 
 - **[dsh-session-vacuum](https://github.com/mili1360/dsh-session-vacuum)** — deletes the dead
   streaming fragments out of session logs at startup, so loading a long session stops expanding
-  into gigabytes. (Different layer from this plugin: that one shrinks the log on disk, this one
-  shrinks what each request carries.)
+  into gigabytes. (Different layer from this plugin: that one keeps the *log* loadable, this one
+  keeps each *request* workable.)
 - **[dsh-proactive](https://github.com/mili1360/dsh-proactive)** — wakes the agent when a long
   background task finishes after the turn has ended, so it reports back on its own.
 
