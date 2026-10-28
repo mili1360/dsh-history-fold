@@ -4,6 +4,9 @@ name: publish
 # GitHub mints a short-lived identity for this job, npm verifies it against the trusted
 # publisher configured for the package, and the credential expires when the job ends.
 #
+# NOTE: OIDC publish only works for a package that ALREADY exists on npm. The very first
+# publish has to happen once with a token or `npm login`; after that this job takes over.
+#
 # Requirements, both of which the run below enforces or documents:
 #   - `id-token: write` on the job (without it there is no OIDC token to exchange)
 #   - npm >= 11.5.1 in the runner (OIDC publishing landed there; setup-node ships an older one)
@@ -34,8 +37,20 @@ jobs:
           node --version
           npm --version
 
+      # 只跑不依赖 DSH 宿主的三套（fold/profile/edge/ratio 需要真的 DSH 环境，
+      # 在 Ubuntu runner 上跑会假失败，反而挡住发布）。
       - name: test
-        run: npm test
+        run: |
+          node test/recall-tests.mjs
+          node test/rare-tests.mjs
+          node test/notes-tests.mjs
+
+      # 模型必须真的进包：漏了它闸门会静默降级，用户装完以为有、其实没有。
+      - name: verify package contents
+        run: |
+          node -e "const p=require('./package.json'); if(!p.files.includes('model')) { console.error('model/ missing from package.json files'); process.exit(1) }"
+          test -f model/gate-model.json
+          npm pack --dry-run
 
       - name: publish
         run: npm publish --access public
