@@ -16,6 +16,16 @@ DSH 插件：把会话里**最老的一批** surface 节点折成一条消息，
 - **无损** ✓ 被折的每条消息在折叠**提交之前**就已全文落盘，替换内容明确告诉模型去哪儿找
 - **不改 `node_modules`** ✓ 用的是和官方压缩器同一套公开机制，DSH 升级不会把它弄坏
 
+## 安装
+
+```bash
+dsh plugin add --profile web github:mili1360/dsh-history-fold
+```
+
+> **从 git 装，不要用 npm。** 这个包目前还没发到 npm registry，`npm install dsh-history-fold`
+> 会 404。上面这条 git 形式是唯一的官方路径，直接解析仓库、不经过 registry。
+> 装完**重启 DSH** 才生效（bundle 只在启动时注册）。
+
 ---
 > 符号说明：**✓** = 实测确认过 · **✗** = 陷阱，别这么做 · **⚠️** = 注意 · **⇒** = 所以
 
