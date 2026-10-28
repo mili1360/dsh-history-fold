@@ -31,6 +31,57 @@ This plugin folds the **oldest** part of that visible history into a single mess
 
 ---
 
+## What's new in 0.8.0 — it learned when *not* to interrupt you
+
+Recall only helps if it fires at the right moment. The old gate was a regex: if the message
+contained a rare identifier or a word like "last time", go look something up. Measured against
+**659 hand-labelled turns** from this project's own 4,906-message history, that regex fired on
+**22% of turns that did not need it** — a wall of old notes arriving in the middle of ordinary
+conversation.
+
+0.8.0 adds a **659-example classifier** (character n-grams + logistic regression, `lib/gate.js` +
+`model/gate-model.json`) that reviews the rule's decision:
+
+| Measured on 659 hand-labelled real turns | Rule alone | With the classifier |
+|---|---|---|
+| Turns that genuinely need the archive, admitted | 49/87 (56%) | **51/87 (59%)** |
+| Turns that do **not**, falsely triggered | 126/572 (**22.0%**) | **43/572 (7.5%)** |
+
+Both numbers move the right way — which is the only reason it ships. A filter that bought precision
+by giving up recall would have been useless here.
+
+Then the whole decision chain was run over **all 3,431 usable user messages** in that history,
+three ways:
+
+| Route | Fires | Fire rate | Tokens injected |
+|---|---|---|---|
+| 0.7 behaviour (strict) | 670 | 19.5% | ≈709k |
+| 0.8 rules, no classifier | 2,377 | **69.3%** | ≈2.59M |
+| **0.8 + classifier** | **289** | **8.4%** | **≈316k** |
+
+Without the classifier the plugin was injecting old notes on **one message out of three**.
+With it, the fire rate lands in the 10–15% band where the annotated data says real demand is —
+and the injected volume drops **8×**.
+
+The properties that made it shippable rather than merely interesting:
+
+- **1.3 MB, zero dependencies.** Plain JS over a JSON weight table: no ONNX, no runtime, no Python,
+  no network call, no API cost. Inference is sub-millisecond; total recall overhead is 44–53 ms.
+- **A filter, not an oracle.** It sits on top of the existing rules and can only *veto* them when it
+  is confident a turn is noise. Explicit recall intent ("what did we decide last time…") never
+  reaches it.
+- **Missing model = unchanged behaviour.** If `model/gate-model.json` is absent or unreadable the
+  layer is skipped and the rules decide exactly as in 0.7. Nothing is silently disabled, nothing
+  silently enabled.
+- **Trained on this project's own conversations**, not a public benchmark. That is also its limit —
+  see [Limitations](#limitations).
+
+Also in 0.8.0: note scoring is TF-IDF weighted (top-3 on 20 rewritten questions went **7 → 12**),
+`recall.strict` no longer silently abandons a question, and every injection logs the question plus
+the note files it hit — the raw material for training on real usage later.
+
+---
+
 ## Why
 
 Measured on one machine, a long session against a fresh one:
