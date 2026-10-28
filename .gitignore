@@ -11,6 +11,11 @@ logs/
 test/tmp/
 *.tmp
 
+# Release artefacts. `npm pack` writes the tarball here and the GitHub Release is
+# what distributes it; a committed copy would double the repository size for no
+# reason and go stale the moment the version changes.
+*.tgz
+
 # OS / editor junk
 .DS_Store
 Thumbs.db
