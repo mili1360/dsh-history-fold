@@ -58,6 +58,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrite kept the byte length (NTFS mtime resolution cannot separate two writes in the same
   millisecond). The fixture now changes the size too.
 
+## [0.8.2] - 2026-10-28
+
+### Added
+
+- **An unreachable threshold pair is announced instead of quietly idling.** A trigger that sits at
+  or above DSH's own compaction line, or at or above the context window itself, parses cleanly,
+  logs `idle` on every turn, and folds nothing — forever. That is not hypothetical: one install ran
+  `triggerSurfaceTokens: 750000` against a 1000000-token window for three weeks and never folded,
+  because the built-in compactor (`dsh-compaction-basic`, `thresholdRatio` 0.8) always reached the
+  history first. Now `resolveThresholds()` returns `warnings` (`trigger-behind-native-compaction`,
+  `trigger-at-or-above-window`, `target-not-below-trigger`) and the plugin writes one
+  `mark: "threshold-warning"` line per distinct resolved pair, so the next misconfiguration is one
+  grep away instead of three weeks away. Five tests cover it, including "no window, no claim".
+
+  Worth knowing when reading the numbers: `surfaceTokens` comes from DSH's own meter, and on this
+  machine's Chinese-heavy history it under-reports the real request by a measured ~1.75x
+  (452,024 surface = 790,915 real prompt tokens, stable across 35 consecutive turns). A trigger
+  tuned in surface units therefore sits ~1.75x higher in real tokens than it looks.
+
 ## [0.8.1] - 2026-10-28
 
 ### Fixed

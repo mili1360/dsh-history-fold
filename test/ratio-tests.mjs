@@ -534,6 +534,65 @@ await test('targetRatio >= triggerRatio with a resolvable-but-tiny surface: same
   assert.ok(['no-safe-cut', 'idle'].includes(lastMark().mark), 'either guard is acceptable; a crash is not')
 })
 
+// ------------------------------------------------- 13. unreachable thresholds are announced
+//
+// The bug these pin down is the one this install actually shipped: trigger 750000 against a
+// 1000000 window. It parses, it logs "idle" every turn, and it never folds -- because DSH's
+// own compaction (thresholdRatio 0.8) reaches the history first. Being silent is the whole
+// problem, so being loud once per distinct set is the fix.
+
+function warningsFor(opts) {
+  resetLog()
+  writeConfig({ ...BASE, profile: false, ...opts })
+  return buildSession(makeSteps(20))
+}
+
+await test('a trigger above the native compaction line is reported once, not every turn', async () => {
+  // 800000/170000 rather than the shipped 750000/180000 pair: those numbers already appear in
+  // the ratio cases above, and the announcement is deduped per process by resolved numbers.
+  const { session, meter } = warningsFor({ triggerSurfaceTokens: 800000, targetSurfaceTokens: 170000 })
+  const llm = fakeLlm({ context: { contextWindow: WINDOW } })
+  await runHandler({ session, llm, withMeter: true, meter })
+  const first = logLines().filter((l) => l.mark === 'threshold-warning')
+  assert.equal(first.length, 1, 'exactly one warning line')
+  assert.deepEqual(first[0].warnings, ['trigger-behind-native-compaction'])
+  assert.equal(first[0].triggerSource, 'absolute', 'the shipped config used an absolute trigger')
+  await runHandler({ session, llm, withMeter: true, meter })
+  assert.equal(logLines().filter((l) => l.mark === 'threshold-warning').length, 1, 'the same set must not be repeated')
+})
+
+await test('a trigger at or above the window is called out as unreachable', async () => {
+  const { session, meter } = warningsFor({ triggerSurfaceTokens: 1500000, targetSurfaceTokens: 160000 })
+  const llm = fakeLlm({ context: { contextWindow: WINDOW } })
+  await runHandler({ session, llm, withMeter: true, meter })
+  const line = logLines().find((l) => l.mark === 'threshold-warning')
+  assert.ok(line, 'an unreachable trigger must be announced')
+  assert.ok(line.warnings.includes('trigger-at-or-above-window'))
+})
+
+await test('a healthy threshold pair logs no warning at all', async () => {
+  const { session, meter } = warningsFor({ triggerSurfaceTokens: 300000, targetSurfaceTokens: 130000 })
+  const llm = fakeLlm({ context: { contextWindow: WINDOW } })
+  await runHandler({ session, llm, withMeter: true, meter })
+  assert.equal(logLines().filter((l) => l.mark === 'threshold-warning').length, 0)
+})
+
+await test('a target above the trigger is reported, because nothing can ever be folded', async () => {
+  const { session, meter } = warningsFor({ triggerSurfaceTokens: 100000, targetSurfaceTokens: 200000 })
+  const llm = fakeLlm({ context: { contextWindow: WINDOW } })
+  await runHandler({ session, llm, withMeter: true, meter })
+  const line = logLines().find((l) => l.mark === 'threshold-warning')
+  assert.ok(line, 'target-not-below-trigger must be announced')
+  assert.ok(line.warnings.includes('target-not-below-trigger'))
+})
+
+await test('an unknown window cannot produce a window-relative warning', async () => {
+  const { session, meter } = warningsFor({ triggerSurfaceTokens: 900000, targetSurfaceTokens: 180000 })
+  const llm = fakeLlm(undefined) // resolveModelInfo answers nothing -> no window
+  await runHandler({ session, llm, withMeter: true, meter })
+  assert.equal(logLines().filter((l) => l.mark === 'threshold-warning').length, 0, 'no window, no claim')
+})
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('\n' + passed + ' passed, ' + failed + ' failed')
 process.exit(failed === 0 ? 0 : 1)
