@@ -32,6 +32,66 @@ It is memory, not bookkeeping:
 - **The notes are regenerable from your session logs** — delete them entirely and the next refresh
   mines them back. Measured below.
 
+## ⚠️ Read this first: precision is not the same as remembering
+
+The engineering here is complete: lossless archive, recoverable index, semantic vectors,
+extractive notes — each one real, each one tested. **None of that adds up to "it remembers what
+you talked about."**
+
+Measured against **659 human-labelled turns** out of this project's own 4,906-turn history:
+
+| Metric | Measured |
+|---|---|
+| Turns that genuinely needed the archive, **correctly let through** | 51/87 = **59%** |
+| Turns that did not need it, wrongly triggered | 43/572 = 7.5% |
+
+**Four times in ten, a turn that should have pulled up old context did not.** That is not a bug —
+it is a deliberate trade:
+
+| Configuration | Injections | Share of turns |
+|---|---|---|
+| 0.7 strict | 670 | 19.5% |
+| 0.8, no classifier | 2,377 | 69.3% |
+| **0.8 + classifier** (current) | 289 | **8.4%** |
+
+Going from 69% to 8.4% is how the token cost was cut. The 41% of missed recalls is what paid for it.
+**The saved tokens are real. So is what gets forgotten.**
+
+> **Read every "complete"/"lossless" claim below with that caveat.** This plugin guarantees that
+> *folded content is never lost*. It does not guarantee that *the right content comes back at the
+> right moment*. The first is an engineering problem and it is solved. The second is a **judgement**
+> problem.
+
+### 2026-10-29: the three real causes found and fixed
+
+The 59% above is the classifier layer. Digging below it showed the missed recalls were mostly
+**not** the classifier's fault. After fixing three things, measured end-to-end on 10 real questions:
+
+| | Before | After |
+|---|---|---|
+| End-to-end recall (10 questions) | **3/10** | **9/10** |
+| Chit-chat false positives (10 turns) | — | **1/10** (only "好的") |
+
+The three causes:
+
+1. **`crossSession` defaulted to `false`** — only *this* session's notes were searched. Anything
+   said in another session was outside the search radius entirely. **This was the biggest single
+   cause.** Now on by default.
+2. **`gateThreshold` defaulted to `0.50`, which sat inside a cluster** — "B65 到了怎么跑" scored
+   0.444, "显存怎么分配" 0.424, "二班下好了吗" 0.413: all rejected by a hair. Lowered to 0.40,
+   which recovers all of them at the cost of admitting one extra 闲聊 turn.
+3. **`entity-map.json` coordinates were mostly broken** — bare filenames caused cross-session
+   misalignment, line numbers ran past end-of-file or pointed at `##` headings, and keys shorter
+   than 3 characters were skipped outright by `searchRare` (`桌宠`/`沙箱`/`肉鸽`/`双路`/`显存`
+   had **never** fired). All 19 entries recomputed.
+
+> ⚠️ The 9/10 comes from **10 hand-written questions**; the 59% comes from **659 human-labelled
+> turns**. They are different datasets and must not be compared directly, and the 659-turn set has
+> not been re-run. Treat 9/10 as "what the new configuration does on these 10", not as "recall is
+> now 90%".
+
+---
+
 - **Inert by default.** A fresh install reads nothing, writes nothing and logs nothing
   until you configure it.
 - **Lossless.** Every folded message is written to a local archive *before* the fold is
