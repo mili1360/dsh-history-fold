@@ -777,3 +777,37 @@ here is ranked by stars — the plugin directories and GitHub's own search both 
 a reader who was helped is the only thing that moves that number. Bug reports and "this did not
 work on my build" are just as valuable: they are the only reason the compatibility section above
 is worth anything.
+
+---
+
+## Models: what ships, and what is optional
+
+**Two different things called "model" here — do not confuse them.**
+
+| | what it is | ships with the repo? | needs a service? |
+|---|---|---|---|
+| `model/gate-model.json` | 659-example classifier (logistic regression over char n-grams) that vetoes noisy recalls. 1.3 MB of plain JSON. | **Yes** — committed in the repo | No. Pure JS, zero deps, sub-ms inference. |
+| `bge-small-zh` (semantic recall) | Optional semantic search over notes/archive. Talks HTTP to an OpenAI-compatible `/v1/embeddings` endpoint. | No | **Yes** — you need an embedding server (e.g. `llama.cpp` with `--embeddings`, or any OpenAI-compatible one) on `http://127.0.0.1:8021/v1/embeddings` (configurable via `recall.semantic.endpoint`). |
+
+### If you do not run an embedding server
+
+Nothing breaks. Keyword recall (TF-IDF note scoring) keeps working; semantic recall and the rare-term
+route that depends on it are skipped. `Missing model = unchanged behaviour` is the rule everywhere.
+
+### Getting bge-small-zh
+
+Any server that answers `POST /v1/embeddings` with `{"model": "...", "input": [...]}` and returns
+`data[i].embedding` works. A compact path on a CPU-only box:
+
+`ash
+# llama.cpp server with an embedding-capable GGUF (e.g. bge-small-zh-v1.5)
+llama-server -m bge-small-zh-v1.5-Q8_0.gguf --embeddings --port 8021
+`
+
+Then set the endpoint if it is not the default:
+
+`json
+{ "recall": { "semantic": { "endpoint": "http://127.0.0.1:8021/v1/embeddings" } } }
+`
+
+The vector cache keys include the model name, so switching models never silently mixes vectors.
